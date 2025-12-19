@@ -1,0 +1,21 @@
+version: '3.9'
+services:
+  api:
+    image: python:3.11-slim
+    working_dir: /app
+    command: bash -lc "pip install -r backend/requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    volumes:
+      - ./backend:/app
+      - ./spectra_history:/spectra_history
+    ports:
+      - "8000:8000"
+  web:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -lc "npm ci && npm run dev -- --host 0.0.0.0"
+    volumes:
+      - ./frontend:/app
+    environment:
+      - VITE_API_BASE=http://localhost:8000
+    ports:
+      - "5173:5173"
