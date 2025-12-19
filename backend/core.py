@@ -83,3 +83,22 @@ def ndarray_to_list_dict(d: Dict[str, np.ndarray]) -> Dict[str, list]:
 
 def json_dumps(obj: dict) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2)
+
+def solve_non_negative_least_squares(
+    standards_matrix: np.ndarray, sample: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray, float, float]:
+    """
+    Solve a simple non-negative least squares problem using numpy.linalg.lstsq
+    followed by clipping to enforce non-negativity.
+    """
+    if standards_matrix.ndim != 2:
+        raise ValueError("标准样数据矩阵必须是二维的")
+    if standards_matrix.shape[0] != sample.shape[0]:
+        raise ValueError("标准样与样品的光谱长度不一致")
+    coeffs, _, _, _ = np.linalg.lstsq(standards_matrix, sample, rcond=None)
+    coeffs = np.clip(coeffs, 0, None)
+    fitted = standards_matrix @ coeffs
+    residual = sample - fitted
+    rmse = float(np.sqrt(np.mean(residual ** 2)))
+    residual_norm = float(np.linalg.norm(residual))
+    return coeffs, fitted, rmse, residual_norm

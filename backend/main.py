@@ -7,12 +7,20 @@ import io, zipfile
 import numpy as np
 import pandas as pd
 
-from .schemas import ProcessOptions, SavePayload, HistoryItem
+from .schemas import (
+    SavePayload, HistoryItem, HistoryUpdatePayload,
+    UserLogin, UserCreate, UserPublic, ConcentrationRequest
+)
 from .core import (
     read_spc_first_xy, interp_to, compute_corrected,
-    poly_smooth, build_export_columns, ndarray_to_list_dict
+    poly_smooth, build_export_columns, ndarray_to_list_dict,
+    solve_non_negative_least_squares
 )
-from .storage import save_json, list_history, load_json
+from .storage import (
+    save_json, list_history, load_json, rename_history,
+    update_history_meta, delete_history, authenticate_user,
+    list_users, create_user, delete_user
+)
 
 app = FastAPI(title="Spectra Processor API", version="1.0.0")
 
@@ -36,9 +44,9 @@ async def process_spectra(
     out_corr: bool = Form(True),
     out_T: bool = Form(True),
     out_A: bool = Form(True),
-    smooth_enabled: bool = Form(False),
-    smooth_window: int = Form(11),
-    smooth_order: int = Form(3),
+    smooth_enabled: bool = Form(False, alias="enableSmoothing"),
+    smooth_window: int = Form(11, alias="smoothWindow"),
+    smooth_order: int = Form(3, alias="smoothOrder"),
 ):
     try:
         tmp_dir = Path("./_tmp"); tmp_dir.mkdir(exist_ok=True)
@@ -69,7 +77,19 @@ async def process_spectra(
                 A = poly_smooth(A, window=smooth_window, order=smooth_order)
 
         cols = build_export_columns(x_s, I_corr, T, A, out_corr, out_T, out_A)
-        return {"data": ndarray_to_list_dict(cols), "meta": {"smooth_enabled": smooth_enabled}}
+        meta = {
+            "name": sample.filename.replace(".spc", ""),
+            "timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "smooth_enabled": smooth_enabled,
+            "smooth_window": smooth_window,
+            "smooth_order": smooth_order,
+            "files": {
+                "sample": sample.filename,
+                "water": water.filename,
+                "dark": dark.filename
+            }
+        }
+        return {"data": ndarray_to_list_dict(cols), "meta": meta}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -91,6 +111,37 @@ async def history_item(name: str):
         return load_json(name)
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+@app.patch("/history/{name}")
+async def update_history(name: str, payload: HistoryUpdatePayload):
+    try:
+        target = payload.target_name
+        final_name = name
+        if target and target != name:
+            rename_history(name, target)
+            final_name = target
+        updates = {}
+        if payload.concentration is not None:
+            updates["concentration"] = payload.concentration
+        if payload.save_type is not None:
+            updates["save_type"] = payload.save_type
+        if updates:
+            update_history_meta(final_name, updates)
+        return load_json(final_name)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.delete("/history/{name}")
+async def delete_history_item(name: str):
+    try:
+        delete_history(name)
+        return {"ok": True}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/history/{name}/csv")
 async def history_item_csv(name: str):
@@ -126,3 +177,79 @@ async def export_batch_zip():
     mem.seek(0)
     return StreamingResponse(mem, media_type="application/zip",
                              headers={"Content-Disposition": "attachment; filename=histories.zip"})
+
+@app.post("/analysis/concentration")
+async def analyze_concentration(payload: ConcentrationRequest):
+    try:
+        sample_obj = load_json(payload.sample)
+        standard_objs = [load_json(name) for name in payload.standards]
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    try:
+        sample_data = sample_obj.get("data", {})
+        sample_A = np.asarray(sample_data.get("A"), dtype=float)
+        if sample_A.size == 0 or sample_A.ndim != 1:
+            raise ValueError("样品缺少A光谱数据")
+        standards_A = []
+        for obj in standard_objs:
+            arr = np.asarray(obj.get("data", {}).get("A"), dtype=float)
+            if arr.shape != sample_A.shape:
+                raise ValueError("标准样与样品的光谱长度不一致")
+            standards_A.append(arr)
+        matrix = np.column_stack(standards_A)
+        coeffs, fitted, rmse, residual_norm = solve_non_negative_least_squares(matrix, sample_A)
+        total = float(np.sum(coeffs))
+        components = []
+        for coef, std_obj, name in zip(coeffs, standard_objs, payload.standards):
+            meta_name = std_obj.get("meta", {}).get("name") or name
+            contribution = float((coef / total) * 100) if total > 0 else 0.0
+            components.append({
+                "name": meta_name,
+                "concentration": float(coef),
+                "contribution": contribution
+            })
+        residual = sample_A - fitted
+        return {
+            "components": components,
+            "metrics": {"rmse": rmse, "residual_norm": residual_norm},
+            "chart_data": {
+                "lambda": sample_data.get("lambda"),
+                "original": sample_A.tolist(),
+                "fitted": fitted.tolist(),
+                "residual": residual.tolist()
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/auth/login", response_model=UserPublic)
+async def login(payload: UserLogin):
+    try:
+        return authenticate_user(payload.username, payload.password)
+    except PermissionError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/auth/users", response_model=list[UserPublic])
+async def get_users():
+    return list_users()
+
+@app.post("/auth/users", response_model=UserPublic)
+async def add_user(payload: UserCreate):
+    try:
+        return create_user(payload.username, payload.password, payload.role)
+    except FileExistsError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.delete("/auth/users/{username}")
+async def remove_user(username: str):
+    try:
+        delete_user(username)
+        return {"ok": True}
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
