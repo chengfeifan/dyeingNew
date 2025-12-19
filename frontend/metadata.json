@@ -1,0 +1,5 @@
+{
+  "name": "智能光谱分析系统",
+  "description": "基于 FastAPI 和 React 的光谱数据预处理、浓度解析与预测系统",
+  "requestFramePermissions": []
+}
