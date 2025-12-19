@@ -12,6 +12,7 @@ export interface ProcessedData {
     };
     save_type?: 'standard' | 'multicomponent';
     concentration?: string;
+    [key: string]: any;
   };
   data: {
     lambda: number[];
@@ -34,6 +35,7 @@ export interface HistoryItem {
   meta?: {
       save_type?: 'standard' | 'multicomponent';
       concentration?: string;
+      [key: string]: any;
   }
 }
 

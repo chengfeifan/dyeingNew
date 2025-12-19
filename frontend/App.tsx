@@ -111,7 +111,7 @@ const App: React.FC = () => {
       setData(result);
     } catch (err: any) {
       console.error(err);
-      setError(err.response?.data?.detail || "处理失败，请检查后端服务是否运行。");
+      setError(err?.message || "处理失败，请检查后端服务是否运行。");
     } finally {
       setLoading(false);
     }

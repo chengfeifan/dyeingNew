@@ -1,20 +1,17 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# 前端开发说明
 
-# Run and deploy your AI Studio app
+React + Vite 前端位于本目录。常用脚本：
 
-This contains everything you need to run your app locally.
+```bash
+# 安装依赖
+npm ci
 
-View your app in AI Studio: https://ai.studio/apps/drive/1qYJixP_J19LhDYvxZldJIvX1T1hPmEzJ
+# 本地开发，默认对接 http://localhost:8000
+VITE_API_BASE=http://localhost:8000 npm run dev -- --host 0.0.0.0 --port 5173
 
-## Run Locally
+# 生产构建与本地预览
+npm run build
+npm run preview -- --host 0.0.0.0 --port 4173
+```
 
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+`VITE_API_BASE` 控制前端调用的后端地址（需能被浏览器访问）。更多部署与后端接口说明见仓库根目录的 `README.md`。

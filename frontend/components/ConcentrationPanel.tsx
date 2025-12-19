@@ -58,7 +58,7 @@ export const ConcentrationPanel: React.FC = () => {
             const res = await analyzeConcentration(selectedSample, selectedStandards);
             setResult(res);
         } catch (err: any) {
-            setError(err.response?.data?.detail || "分析失败");
+            setError(err?.message || "分析失败");
         } finally {
             setLoading(false);
         }
