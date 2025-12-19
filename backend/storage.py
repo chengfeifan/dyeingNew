@@ -1,11 +1,13 @@
 from __future__ import annotations
 import json
+import os
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
-HISTORY_DIR = Path.cwd() / "spectra_history"
+# 数据落盘位置支持环境变量覆盖，便于容器挂载
+HISTORY_DIR = Path(os.environ.get("HISTORY_DIR", Path.cwd() / "spectra_history"))
 DB_PATH = HISTORY_DIR / "history.db"
 HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -91,14 +93,19 @@ def list_history() -> List[dict]:
     items: List[dict] = []
     with _get_conn() as conn:
         rows = conn.execute(
-            "SELECT name, timestamp FROM history ORDER BY timestamp DESC"
+            "SELECT name, timestamp, meta FROM history ORDER BY timestamp DESC"
         ).fetchall()
         for row in rows:
-            items.append({
-                "name": row["name"],
-                "file": f"{row['name']}.sqlite",
-                "timestamp": row["timestamp"]
-            })
+            meta = json.loads(row["meta"])
+            items.append(
+                {
+                    "name": row["name"],
+                    "file": f"{row['name']}.sqlite",
+                    "filename": f"{row['name']}.sqlite",
+                    "timestamp": row["timestamp"],
+                    "meta": meta,
+                }
+            )
 
     # 兼容仍未导入的 JSON 文件
     existing_names = {item["name"] for item in items}
@@ -111,10 +118,12 @@ def list_history() -> List[dict]:
             items.append({
                 "name": meta.get("name") or p.stem,
                 "file": p.name,
-                "timestamp": meta.get("timestamp", "")
+                "filename": p.name,
+                "timestamp": meta.get("timestamp", ""),
+                "meta": meta,
             })
         else:
-            items.append({"name": p.stem, "file": p.name, "timestamp": ""})
+            items.append({"name": p.stem, "file": p.name, "filename": p.name, "timestamp": "", "meta": {}})
     return items
 
 def _load_from_db(name: str) -> Optional[dict]:
@@ -128,6 +137,41 @@ def _load_from_db(name: str) -> Optional[dict]:
             "meta": json.loads(row["meta"]),
             "data": json.loads(row["data"])
         }
+
+
+def rename_history(old_name: str, new_name: str) -> Dict[str, str]:
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT meta, data FROM history WHERE name = ?", (old_name,)
+        ).fetchone()
+        if not row:
+            raise FileNotFoundError(old_name)
+        meta = json.loads(row["meta"])
+        data = json.loads(row["data"])
+        meta["name"] = new_name
+        meta["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute(
+            """
+            UPDATE history
+            SET name = ?, timestamp = ?, meta = ?, data = ?
+            WHERE name = ?
+            """,
+            (
+                new_name,
+                meta["timestamp"],
+                json.dumps(meta, ensure_ascii=False),
+                json.dumps(data, ensure_ascii=False),
+                old_name,
+            ),
+        )
+
+    # legacy JSON file rename if still存在
+    legacy_old = HISTORY_DIR / f"{old_name}.json"
+    legacy_new = HISTORY_DIR / f"{new_name}.json"
+    if legacy_old.exists():
+        legacy_old.rename(legacy_new)
+
+    return {"name": new_name, "filename": f"{new_name}.sqlite", "timestamp": meta["timestamp"]}
 
 def load_json(name_or_file: str) -> dict:
     p = Path(name_or_file)
