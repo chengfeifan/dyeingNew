@@ -28,12 +28,17 @@
 
 - 后端服务：`python:3.11-slim`，安装 `backend/requirements.txt`，命令 `uvicorn main:app --host 0.0.0.0 --port 8000`。
 - 前端服务：`node:20-alpine`，执行 `npm ci && npm run build && npm run preview -- --host 0.0.0.0 --port 4173`。
-- 默认环境：`VITE_API_BASE=http://localhost:8000`；持久化历史数据到宿主机 `./spectra_history`（映射为 `/app/spectra_history`）。如需修改，可在 compose 环境段调整。
+- Nginx 反向代理：`nginx:1.27-alpine`，默认代理域名 `https://spectrum.arkshow.com`，转发 `/api` 与 `/health` 至后端，其他流量至前端。
+- 默认环境：前端通过相对路径 `/api` 访问接口；持久化历史数据到宿主机 `./spectra_history`（映射为 `/app/spectra_history`）。如需修改，可在 compose 环境段调整。
 
 启动后可访问：
 
-- API: http://localhost:8000/health
-- 前端: http://localhost:4173/
+- 直连 API: http://localhost:8000/health
+- 直连前端: http://localhost:4173/
+- 经 Nginx 代理的入口：  
+  - HTTP: http://localhost/ （自动 301 到 HTTPS）  
+  - HTTPS: https://localhost/ （如使用自签证书需信任后访问）  
+  - 健康检查: https://localhost/health
 
 ## 接口概览
 
@@ -49,3 +54,16 @@
 - **缺少依赖**：请确认已执行 `pip install -r backend/requirements.txt` 与 `npm ci`。
 - **跨域/接口地址错误**：前端接口地址由 `VITE_API_BASE` 控制，需可从浏览器直连后端（通常设置为 `http://localhost:8000`）。
 - **历史数据路径**：通过 `HISTORY_DIR` 或挂载 `spectra_history` 目录保持持久化。默认管理员密码固定为 `spectral123`，可在后端用户管理中新增或删除普通用户。
+
+## 将域名指向 Nginx（示例：spectrum.arkshow.com）
+
+1. 确保域名 `spectrum.arkshow.com` 指向部署服务器的公网 IP（A 记录）。  
+2. 将 TLS 证书文件放置到仓库根目录 `nginx/certs/` 下，文件名：  
+   - `fullchain.pem`  
+   - `privkey.pem`  
+   若使用自签证书，可先通过 `openssl` 生成自签对后再放入。
+3. 根据需要修改 `nginx/default.conf` 中的 `server_name`（默认 `spectrum.arkshow.com`）以及监听端口/转发策略。
+4. 执行 `./run_docker.sh`，Nginx 将自动代理：  
+   - `https://spectrum.arkshow.com/api` -> 后端 8000  
+   - `https://spectrum.arkshow.com/`   -> 前端 4173  
+5. 若需要开放 HTTP（临时测试），可自行调整 `default.conf` 中的重定向规则。

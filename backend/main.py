@@ -7,16 +7,16 @@ import io, zipfile
 import numpy as np
 import pandas as pd
 
-from .schemas import (
+from schemas import (
     SavePayload, HistoryItem, HistoryUpdatePayload,
     UserLogin, UserCreate, UserPublic, ConcentrationRequest
 )
-from .core import (
+from core import (
     read_spc_first_xy, interp_to, compute_corrected,
     poly_smooth, build_export_columns, ndarray_to_list_dict,
     solve_non_negative_least_squares
 )
-from .storage import (
+from storage import (
     save_json, list_history, load_json, rename_history,
     update_history_meta, delete_history, authenticate_user,
     list_users, create_user, delete_user
