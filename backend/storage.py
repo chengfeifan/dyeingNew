@@ -3,11 +3,12 @@ import json
 import sqlite3
 import hashlib
 import hmac
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
-HISTORY_DIR = Path.cwd() / "spectra_history"
+HISTORY_DIR = Path(os.getenv("HISTORY_DIR", Path.cwd() / "spectra_history"))
 DB_PATH = HISTORY_DIR / "history.db"
 HISTORY_DIR.mkdir(parents=True, exist_ok=True)
 PASSWORD_SALT = "spectra_salt_v1"
