@@ -3,7 +3,7 @@ import { ProcessedData, ProcessingParams, HistoryItem, ConcentrationResult, User
 
 const SESSION_KEY = 'spectral_app_session';
 const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
 const api = axios.create({
   baseURL: API_BASE,
