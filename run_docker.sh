@@ -23,4 +23,4 @@ if [[ ! -f "$FULLCHAIN" || ! -f "$PRIVKEY" ]]; then
     -addext "subjectAltName=DNS:${DOMAIN}"
 fi
 
-docker compose up --build
+docker-compose up --build
