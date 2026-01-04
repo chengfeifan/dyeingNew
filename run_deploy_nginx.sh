@@ -29,6 +29,12 @@ if [ -f package-lock.json ]; then npm ci; else npm install; fi
 VITE_API_BASE=/api npm run build
 cd "$APP_DIR"
 
+echo "===> [3.5/6] Ensure Nginx can read frontend dist"
+# Nginx needs execute permission on all parent directories to traverse.
+# Add read/execute for others to frontend/dist and its parent directories.
+chmod o+rx "$APP_DIR" "$APP_DIR/frontend" || true
+chmod -R o+rX "$APP_DIR/frontend/dist"
+
 echo "===> [4/6] Install Nginx if missing"
 if ! command -v nginx >/dev/null; then
   # Ubuntu/Debian
