@@ -4,7 +4,7 @@ import { BoltIcon, FolderArrowDownIcon } from '@heroicons/react/24/outline';
 
 interface ControlPanelProps {
   onProcess: (files: { sample: File; water: File; dark: File }, params: ProcessingParams) => void;
-  onSave: (name: string, type: 'standard' | 'multicomponent', concentration?: string) => void;
+  onSave: (name: string, type: 'standard' | 'multicomponent', concentration?: string, dyeCode?: string) => void;
   loading: boolean;
   hasData: boolean;
 }
@@ -26,6 +26,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
   const [saveName, setSaveName] = useState('');
   const [saveType, setSaveType] = useState<'standard' | 'multicomponent'>('standard');
   const [concentration, setConcentration] = useState('');
+  const [dyeCode, setDyeCode] = useState('');
 
   const handleFileChange = (key: keyof typeof files) => (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -165,16 +166,28 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
                 </label>
              </div>
 
-             {saveType === 'standard' && (
-                 <div className="animate-fade-in">
-                    <label className="block text-xs font-medium text-slate-500 mb-1">浓度 (Concentration)</label>
-                    <input 
-                        type="text"
-                        placeholder="例如: 0.5 g/L"
-                        value={concentration}
-                        onChange={(e) => setConcentration(e.target.value)}
-                        className="w-full bg-slate-800 border-slate-700 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm text-slate-200"
-                    />
+           {saveType === 'standard' && (
+                 <div className="animate-fade-in space-y-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">浓度 (Concentration)</label>
+                      <input 
+                          type="text"
+                          placeholder="例如: 0.5 g/L"
+                          value={concentration}
+                          onChange={(e) => setConcentration(e.target.value)}
+                          className="w-full bg-slate-800 border-slate-700 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm text-slate-200"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-500 mb-1">染料代码 (Dye Code)</label>
+                      <input
+                          type="text"
+                          placeholder="例如: DYE-001"
+                          value={dyeCode}
+                          onChange={(e) => setDyeCode(e.target.value)}
+                          className="w-full bg-slate-800 border-slate-700 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm text-slate-200"
+                      />
+                    </div>
                  </div>
              )}
            </div>
@@ -188,7 +201,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
                 className="flex-1 bg-slate-800 border-slate-700 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500 text-slate-200"
              />
              <button
-                onClick={() => onSave(saveName, saveType, concentration)}
+                onClick={() => onSave(saveName, saveType, concentration, dyeCode)}
                 disabled={!saveName || (saveType === 'standard' && !concentration)}
                 className="px-3 py-2 bg-emerald-700 text-white rounded-md hover:bg-emerald-600 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed flex items-center shadow-sm border border-emerald-600 disabled:border-slate-700"
              >

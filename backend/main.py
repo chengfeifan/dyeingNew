@@ -97,7 +97,7 @@ async def process_spectra(
 async def save_result(payload: SavePayload):
     try:
         out = save_json(payload.name, payload.data, payload.meta)
-        return {"ok": True, "name": out["name"], "timestamp": out["timestamp"]}
+        return {"ok": True, "name": out["name"], "timestamp": out["timestamp"], "id": out.get("id")}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
