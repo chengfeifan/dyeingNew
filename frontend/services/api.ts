@@ -72,7 +72,8 @@ export const saveHistory = async (
   name: string,
   data: ProcessedData,
   saveType: 'standard' | 'multicomponent',
-  concentration?: string
+  concentration?: string,
+  dyeCode?: string
 ): Promise<void> => {
   try {
     await api.post('/save', {
@@ -83,6 +84,7 @@ export const saveHistory = async (
         name,
         save_type: saveType,
         concentration: concentration ?? data.meta.concentration,
+        dye_code: dyeCode ?? data.meta.dye_code,
       },
     });
   } catch (error) {

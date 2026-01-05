@@ -241,7 +241,12 @@ export const ConcentrationPanel: React.FC = () => {
                                         />
                                         <div>
                                             <div className="text-sm font-medium text-slate-300">{std.name}</div>
-                                            <div className="text-xs text-slate-500">Ref Conc: {std.meta?.concentration || 'N/A'}</div>
+                                            <div className="text-xs text-slate-500">
+                                                Ref Conc: {std.meta?.concentration || 'N/A'}
+                                            </div>
+                                            <div className="text-xs text-slate-500">
+                                                Dye Code: {std.meta?.dye_code || 'N/A'}
+                                            </div>
                                         </div>
                                     </label>
                                 ))}

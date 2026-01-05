@@ -24,7 +24,8 @@ def _init_db() -> None:
     with _get_conn() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS history (
-                name TEXT PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
                 timestamp TEXT NOT NULL,
                 meta TEXT NOT NULL,
                 data TEXT NOT NULL
@@ -38,6 +39,25 @@ def _init_db() -> None:
                 last_login TEXT DEFAULT ''
             )
         """)
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(history)")}
+        if "id" not in columns:
+            conn.execute("ALTER TABLE history RENAME TO history_legacy")
+            conn.execute("""
+                CREATE TABLE history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    meta TEXT NOT NULL,
+                    data TEXT NOT NULL
+                )
+            """)
+            conn.execute(
+                """
+                INSERT INTO history (name, timestamp, meta, data)
+                SELECT name, timestamp, meta, data FROM history_legacy
+                """
+            )
+            conn.execute("DROP TABLE history_legacy")
 
 def _load_json_file(path: Path) -> Optional[dict]:
     try:
@@ -115,14 +135,10 @@ def save_json(name: str, data: Dict, meta: Dict) -> Dict[str, str]:
     meta2.setdefault("name", name)
     meta2.setdefault("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     with _get_conn() as conn:
-        conn.execute(
+        cur = conn.execute(
             """
             INSERT INTO history (name, timestamp, meta, data)
             VALUES (?, ?, ?, ?)
-            ON CONFLICT(name) DO UPDATE SET
-                timestamp = excluded.timestamp,
-                meta = excluded.meta,
-                data = excluded.data
             """,
             (
                 name,
@@ -131,27 +147,28 @@ def save_json(name: str, data: Dict, meta: Dict) -> Dict[str, str]:
                 json.dumps(data, ensure_ascii=False),
             ),
         )
-    return {"name": name, "timestamp": meta2["timestamp"]}
+    return {"name": name, "timestamp": meta2["timestamp"], "id": str(cur.lastrowid)}
 
 def list_history() -> List[dict]:
     items: List[dict] = []
+    db_names: set[str] = set()
     with _get_conn() as conn:
         rows = conn.execute(
-            "SELECT name, timestamp, meta FROM history ORDER BY timestamp DESC"
+            "SELECT id, name, timestamp, meta FROM history ORDER BY timestamp DESC"
         ).fetchall()
         for row in rows:
             meta = json.loads(row["meta"])
+            db_names.add(row["name"])
             items.append({
-                "name": row["name"],
-                "file": f"{row['name']}.sqlite",
+                "name": str(row["id"]),
+                "file": f"{row['id']}.sqlite",
                 "timestamp": row["timestamp"],
                 "meta": meta
             })
 
     # 兼容仍未导入的 JSON 文件
-    existing_names = {item["name"] for item in items}
     for p in sorted(HISTORY_DIR.glob("*.json")):
-        if p.stem in existing_names:
+        if p.stem in db_names:
             continue
         obj = _load_json_file(p)
         if obj:
@@ -166,17 +183,34 @@ def list_history() -> List[dict]:
             items.append({"name": p.stem, "file": p.name, "timestamp": "", "meta": {}})
     return items
 
-def _load_from_db(name: str) -> Optional[dict]:
+def _load_from_db(identifier: str) -> Optional[dict]:
     with _get_conn() as conn:
-        row = conn.execute(
-            "SELECT meta, data FROM history WHERE name = ?", (name,)
-        ).fetchone()
+        row = _resolve_history_row(conn, identifier)
         if not row:
             return None
         return {
             "meta": json.loads(row["meta"]),
             "data": json.loads(row["data"])
         }
+
+def _resolve_history_row(conn: sqlite3.Connection, identifier: str) -> Optional[sqlite3.Row]:
+    if identifier.isdigit():
+        row = conn.execute(
+            "SELECT id, name, timestamp, meta, data FROM history WHERE id = ?",
+            (int(identifier),),
+        ).fetchone()
+        if row:
+            return row
+    return conn.execute(
+        """
+        SELECT id, name, timestamp, meta, data
+        FROM history
+        WHERE name = ?
+        ORDER BY timestamp DESC
+        LIMIT 1
+        """,
+        (identifier,),
+    ).fetchone()
 
 def load_json(name_or_file: str) -> dict:
     p = Path(name_or_file)
@@ -199,65 +233,55 @@ def load_json(name_or_file: str) -> dict:
 
 def rename_history(old_name: str, new_name: str) -> Dict[str, str]:
     with _get_conn() as conn:
-        conflict = conn.execute(
-            "SELECT 1 FROM history WHERE name = ?", (new_name,)
-        ).fetchone()
-        if conflict:
-            raise FileExistsError(f"记录 {new_name} 已存在")
-        row = conn.execute(
-            "SELECT meta, data, timestamp FROM history WHERE name = ?", (old_name,)
-        ).fetchone()
+        row = _resolve_history_row(conn, old_name)
         if not row:
             raise FileNotFoundError(old_name)
         meta = json.loads(row["meta"])
         meta["name"] = new_name
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        meta["timestamp"] = ts
         conn.execute(
             """
-            INSERT INTO history (name, timestamp, meta, data)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(name) DO UPDATE SET
-                timestamp = excluded.timestamp,
-                meta = excluded.meta,
-                data = excluded.data
+            UPDATE history
+            SET name = ?, meta = ?, timestamp = ?
+            WHERE id = ?
             """,
             (
                 new_name,
-                row["timestamp"],
                 json.dumps(meta, ensure_ascii=False),
-                row["data"],
+                ts,
+                row["id"],
             ),
         )
-        conn.execute("DELETE FROM history WHERE name = ?", (old_name,))
     legacy_file = HISTORY_DIR / f"{old_name}.json"
     if legacy_file.exists():
         legacy_file.rename(HISTORY_DIR / f"{new_name}.json")
-    return {"name": new_name, "timestamp": row["timestamp"]}
+    return {"name": new_name, "timestamp": ts}
 
 def update_history_meta(name: str, updates: Dict[str, Any]) -> Dict[str, str]:
     with _get_conn() as conn:
-        row = conn.execute(
-            "SELECT meta, timestamp FROM history WHERE name = ?", (name,)
-        ).fetchone()
+        row = _resolve_history_row(conn, name)
         if not row:
             raise FileNotFoundError(name)
         meta = json.loads(row["meta"])
         meta.update({k: v for k, v in updates.items() if v is not None})
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         conn.execute(
-            "UPDATE history SET meta = ?, timestamp = ? WHERE name = ?",
+            "UPDATE history SET meta = ?, timestamp = ? WHERE id = ?",
             (
                 json.dumps(meta, ensure_ascii=False),
                 ts,
-                name,
+                row["id"],
             ),
         )
     return {"name": name, "timestamp": ts, "meta": meta}
 
 def delete_history(name: str) -> None:
     with _get_conn() as conn:
-        cur = conn.execute("DELETE FROM history WHERE name = ?", (name,))
-        if cur.rowcount == 0:
+        row = _resolve_history_row(conn, name)
+        if not row:
             raise FileNotFoundError(name)
+        conn.execute("DELETE FROM history WHERE id = ?", (row["id"],))
     legacy_file = HISTORY_DIR / f"{name}.json"
     if legacy_file.exists():
         legacy_file.unlink()

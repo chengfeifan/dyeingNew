@@ -118,10 +118,15 @@ const App: React.FC = () => {
   };
 
   // Save to History
-  const handleSave = async (name: string, type: 'standard' | 'multicomponent', concentration?: string) => {
+  const handleSave = async (
+    name: string,
+    type: 'standard' | 'multicomponent',
+    concentration?: string,
+    dyeCode?: string
+  ) => {
     if (!data) return;
     try {
-      await saveHistory(name, data, type, concentration);
+      await saveHistory(name, data, type, concentration, dyeCode);
       alert("保存成功！");
       loadHistory();
     } catch (err) {

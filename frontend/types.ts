@@ -12,6 +12,7 @@ export interface ProcessedData {
     };
     save_type?: 'standard' | 'multicomponent';
     concentration?: string;
+    dye_code?: string;
     [key: string]: any;
   };
   data: {
@@ -35,6 +36,7 @@ export interface HistoryItem {
   meta?: {
       save_type?: 'standard' | 'multicomponent';
       concentration?: string;
+      dye_code?: string;
       [key: string]: any;
   }
 }
