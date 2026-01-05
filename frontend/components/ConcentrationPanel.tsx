@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { HistoryItem, ConcentrationResult } from '../types';
 import { fetchHistoryList, analyzeConcentration, updateHistoryItem, deleteHistoryItem } from '../services/api';
-import { BeakerIcon, PlayIcon, BookOpenIcon, TrashIcon, CheckIcon, XMarkIcon, PencilSquareIcon, ArrowDownTrayIcon, DocumentTextIcon, TableCellsIcon } from '@heroicons/react/24/outline';
+import { BeakerIcon, PlayIcon, BookOpenIcon, TrashIcon, CheckIcon, XMarkIcon, PencilSquareIcon, DocumentTextIcon, TableCellsIcon, ArchiveBoxIcon } from '@heroicons/react/24/outline';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 
-type Tab = 'analysis' | 'library';
+type Tab = 'analysis' | 'standard-library' | 'sample-library';
 
 export const ConcentrationPanel: React.FC = () => {
     const [activeTab, setActiveTab] = useState<Tab>('analysis');
@@ -13,6 +13,7 @@ export const ConcentrationPanel: React.FC = () => {
     // Analysis State
     const [selectedSample, setSelectedSample] = useState<string>('');
     const [selectedStandards, setSelectedStandards] = useState<string[]>([]);
+    const [standardSearch, setStandardSearch] = useState('');
     const [result, setResult] = useState<ConcentrationResult | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -37,7 +38,16 @@ export const ConcentrationPanel: React.FC = () => {
     };
 
     const standards = useMemo(() => history.filter(h => h.meta?.save_type === 'standard'), [history]);
-    const samples = useMemo(() => history, [history]);
+    const samples = useMemo(() => history.filter(h => h.meta?.save_type !== 'standard'), [history]);
+    const filteredStandards = useMemo(() => {
+        const keyword = standardSearch.trim().toLowerCase();
+        if (!keyword) return standards;
+        return standards.filter(std => {
+            const name = std.name || '';
+            const dyeCode = std.meta?.dye_code || '';
+            return [name, std.filename, dyeCode].some(value => value.toLowerCase().includes(keyword));
+        });
+    }, [standards, standardSearch]);
 
     // --- Analysis Actions ---
 
@@ -181,15 +191,26 @@ export const ConcentrationPanel: React.FC = () => {
                     浓度解析
                 </button>
                 <button
-                    onClick={() => setActiveTab('library')}
+                    onClick={() => setActiveTab('standard-library')}
                     className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-colors ${
-                        activeTab === 'library' 
+                        activeTab === 'standard-library' 
                         ? 'bg-slate-800 text-indigo-400 shadow-sm border border-slate-700' 
                         : 'text-slate-500 hover:text-slate-300'
                     }`}
                 >
                     <BookOpenIcon className="w-4 h-4" />
                     标准库管理
+                </button>
+                <button
+                    onClick={() => setActiveTab('sample-library')}
+                    className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-colors ${
+                        activeTab === 'sample-library' 
+                        ? 'bg-slate-800 text-indigo-400 shadow-sm border border-slate-700' 
+                        : 'text-slate-500 hover:text-slate-300'
+                    }`}
+                >
+                    <ArchiveBoxIcon className="w-4 h-4" />
+                    样本库管理
                 </button>
             </div>
 
@@ -219,19 +240,29 @@ export const ConcentrationPanel: React.FC = () => {
                         </div>
 
                         {/* 2. Select Standards */}
-                        <div className="bg-slate-900 p-5 rounded-lg shadow-sm border border-slate-800 flex-1 flex flex-col min-h-[300px]">
+                        <div className="bg-slate-900 p-5 rounded-lg shadow-sm border border-slate-800 flex flex-col">
                             <h3 className="font-semibold text-slate-200 mb-3 flex items-center gap-2">
                                 <span className="bg-indigo-900/50 text-indigo-400 w-6 h-6 rounded-full flex items-center justify-center text-xs border border-indigo-500/30">2</span>
                                 选择标准品库 (基向量)
                             </h3>
+
+                            <div className="mb-3">
+                                <input
+                                    type="text"
+                                    value={standardSearch}
+                                    onChange={(e) => setStandardSearch(e.target.value)}
+                                    placeholder="搜索标准品库"
+                                    className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
+                                />
+                            </div>
                             
-                            <div className="flex-1 overflow-y-auto border border-slate-700 rounded-md p-2 space-y-1 bg-slate-950/30 custom-scrollbar">
-                                {standards.length === 0 && (
+                            <div className="h-64 overflow-y-auto border border-slate-700 rounded-md p-2 space-y-1 bg-slate-950/30 custom-scrollbar">
+                                {filteredStandards.length === 0 && (
                                     <div className="text-center text-slate-600 py-4 text-sm">
-                                        暂无标准品。<br/>请切换到“标准库管理”将光谱标记为标准品。
+                                        暂无匹配标准品。<br/>请切换到“标准库管理”将光谱标记为标准品。
                                     </div>
                                 )}
-                                {standards.map(std => (
+                                {filteredStandards.map(std => (
                                     <label key={std.filename} className="flex items-start gap-2 p-2 hover:bg-slate-800 rounded cursor-pointer border border-transparent hover:border-slate-700">
                                         <input 
                                             type="checkbox"
@@ -372,11 +403,17 @@ export const ConcentrationPanel: React.FC = () => {
                 <div className="bg-slate-900 rounded-lg shadow-sm border border-slate-800 p-6 overflow-hidden flex flex-col h-[calc(100vh-180px)]">
                     <div className="flex justify-between items-center mb-6">
                         <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2">
-                            <BookOpenIcon className="w-5 h-5 text-indigo-500" />
-                            光谱标准库管理
+                            {activeTab === 'standard-library' ? (
+                                <BookOpenIcon className="w-5 h-5 text-indigo-500" />
+                            ) : (
+                                <ArchiveBoxIcon className="w-5 h-5 text-indigo-500" />
+                            )}
+                            {activeTab === 'standard-library' ? '标准库管理' : '样本库管理'}
                         </h3>
                         <p className="text-sm text-slate-500">
-                            在此处管理历史光谱的属性。将其类型设为“Standard”即可在浓度解析中作为标准品使用。
+                            {activeTab === 'standard-library'
+                                ? '在此处管理标准品库。将其类型设为“Standard”即可在浓度解析中作为标准品使用。'
+                                : '在此处管理样本库数据，可将其类型设为“Standard”移动到标准库。'}
                         </p>
                     </div>
 
@@ -392,7 +429,7 @@ export const ConcentrationPanel: React.FC = () => {
                                 </tr>
                             </thead>
                             <tbody className="bg-slate-900 divide-y divide-slate-800">
-                                {history.map((item) => (
+                                {(activeTab === 'standard-library' ? standards : samples).map((item) => (
                                     <tr key={item.filename} className="hover:bg-slate-800 transition-colors">
                                         {editingItem === item.filename ? (
                                             <>
