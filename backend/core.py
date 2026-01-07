@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, Iterable, List
 import numpy as np
 import json
 
@@ -102,3 +102,101 @@ def solve_non_negative_least_squares(
     rmse = float(np.sqrt(np.mean(residual ** 2)))
     residual_norm = float(np.linalg.norm(residual))
     return coeffs, fitted, rmse, residual_norm
+
+def ensure_sorted_spectrum(
+    wavelength: np.ndarray, absorbance: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray]:
+    if wavelength.ndim != 1 or absorbance.ndim != 1:
+        raise ValueError("光谱数组必须是一维")
+    if wavelength.shape[0] != absorbance.shape[0]:
+        raise ValueError("波长与吸光度长度不一致")
+    if np.all(np.diff(wavelength) > 0):
+        return wavelength, absorbance
+    if np.all(np.diff(wavelength) < 0):
+        return wavelength[::-1], absorbance[::-1]
+    idx = np.argsort(wavelength)
+    return wavelength[idx], absorbance[idx]
+
+def interp_absorbance(
+    wavelength: np.ndarray, absorbance: np.ndarray, nm: float
+) -> float:
+    wavelength, absorbance = ensure_sorted_spectrum(wavelength, absorbance)
+    return float(np.interp(nm, wavelength, absorbance))
+
+def integrate_trapezoid(
+    wavelength: np.ndarray,
+    absorbance: np.ndarray,
+    nm_left: float,
+    nm_right: float
+) -> float:
+    if nm_right <= nm_left:
+        raise ValueError("积分区间右端必须大于左端")
+    wavelength, absorbance = ensure_sorted_spectrum(wavelength, absorbance)
+    left = max(nm_left, float(wavelength[0]))
+    right = min(nm_right, float(wavelength[-1]))
+    if right <= left:
+        return 0.0
+    mask = (wavelength > left) & (wavelength < right)
+    wl_segment = np.concatenate(([left], wavelength[mask], [right]))
+    abs_left = np.interp(left, wavelength, absorbance)
+    abs_right = np.interp(right, wavelength, absorbance)
+    abs_segment = np.concatenate(([abs_left], absorbance[mask], [abs_right]))
+    return float(np.trapz(abs_segment, wl_segment))
+
+def derivative_central(wavelength: np.ndarray, values: np.ndarray) -> np.ndarray:
+    wavelength, values = ensure_sorted_spectrum(wavelength, values)
+    return np.gradient(values, wavelength)
+
+def solve_linear_or_lstsq(K: np.ndarray, rhs: np.ndarray) -> np.ndarray:
+    K = np.asarray(K, dtype=float)
+    rhs = np.asarray(rhs, dtype=float)
+    if K.ndim != 2:
+        raise ValueError("K 必须是二维矩阵")
+    if rhs.ndim != 1 or rhs.shape[0] != K.shape[0]:
+        raise ValueError("rhs 维度与 K 不匹配")
+    coeffs, _, _, _ = np.linalg.lstsq(K, rhs, rcond=None)
+    return coeffs
+
+def clip_negative_to_zero(values: Iterable[float]) -> List[float]:
+    return [float(v) if v > 0 else 0.0 for v in values]
+
+def estimate_by_lambda_equations(
+    wavelength: np.ndarray,
+    absorbance: np.ndarray,
+    K: np.ndarray,
+    b: np.ndarray,
+    feature_nms: Iterable[float]
+) -> List[float]:
+    y = [interp_absorbance(wavelength, absorbance, nm) for nm in feature_nms]
+    b_total = np.sum(b, axis=1)
+    rhs = np.asarray(y, dtype=float) - b_total
+    coeffs = solve_linear_or_lstsq(K, rhs)
+    return clip_negative_to_zero(coeffs)
+
+def estimate_by_peak_area(
+    wavelength: np.ndarray,
+    absorbance: np.ndarray,
+    K: np.ndarray,
+    b: np.ndarray,
+    feature_intervals: Iterable[Tuple[float, float]]
+) -> List[float]:
+    y = [
+        integrate_trapezoid(wavelength, absorbance, left, right)
+        for left, right in feature_intervals
+    ]
+    b_total = np.sum(b, axis=1)
+    rhs = np.asarray(y, dtype=float) - b_total
+    coeffs = solve_linear_or_lstsq(K, rhs)
+    return clip_negative_to_zero(coeffs)
+
+def ratio_derivative_feature(
+    wavelength: np.ndarray,
+    absorbance: np.ndarray,
+    divisor_absorbance: np.ndarray,
+    nm: float
+) -> float:
+    wavelength, absorbance = ensure_sorted_spectrum(wavelength, absorbance)
+    _, divisor_absorbance = ensure_sorted_spectrum(wavelength, divisor_absorbance)
+    ratio = absorbance / np.maximum(divisor_absorbance, EPS)
+    derivative = derivative_central(wavelength, ratio)
+    return float(np.interp(nm, wavelength, derivative))
