@@ -9,12 +9,14 @@ import pandas as pd
 
 from schemas import (
     SavePayload, HistoryItem, HistoryUpdatePayload,
-    UserLogin, UserCreate, UserPublic, ConcentrationRequest
+    UserLogin, UserCreate, UserPublic, ConcentrationRequest,
+    ConcentrationAnalysisRequest, ConcentrationAnalysisResponse
 )
 from core import (
     read_spc_first_xy, interp_to, compute_corrected,
     poly_smooth, build_export_columns, ndarray_to_list_dict,
-    solve_non_negative_least_squares
+    solve_non_negative_least_squares, estimate_by_lambda_equations,
+    estimate_by_peak_area, ratio_derivative_feature
 )
 from storage import (
     save_json, list_history, load_json, rename_history,
@@ -219,6 +221,111 @@ async def analyze_concentration(payload: ConcentrationRequest):
                 "residual": residual.tolist()
             }
         }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/analysis/concentration-methods", response_model=ConcentrationAnalysisResponse)
+async def analyze_concentration_methods(payload: ConcentrationAnalysisRequest):
+    try:
+        wavelength = np.asarray(payload.sample.wavelength_nm, dtype=float)
+        absorbance = np.asarray(payload.sample.absorbance, dtype=float)
+        if wavelength.size == 0 or absorbance.size == 0:
+            raise ValueError("光谱数据不能为空")
+        method = payload.method
+        concentrations = {}
+        features = {}
+
+        if method == "lambda_equations":
+            if payload.calibration is None:
+                raise ValueError("缺少矩阵标定数据")
+            K = np.asarray(payload.calibration.K, dtype=float)
+            b = np.asarray(payload.calibration.b, dtype=float)
+            if payload.lambda_points:
+                feature_nms = payload.lambda_points
+            else:
+                feature_nms = [
+                    f.nm for f in payload.calibration.feature_defs
+                    if f.kind == "wavelength" and f.nm is not None
+                ]
+            if not feature_nms:
+                raise ValueError("缺少波长特征点")
+            coeffs = estimate_by_lambda_equations(wavelength, absorbance, K, b, feature_nms)
+            concentrations = {
+                name: float(coef)
+                for name, coef in zip(payload.calibration.component_names, coeffs)
+            }
+            features = {"lambda_points": feature_nms}
+
+        elif method == "peak_area":
+            if payload.calibration is None:
+                raise ValueError("缺少矩阵标定数据")
+            K = np.asarray(payload.calibration.K, dtype=float)
+            b = np.asarray(payload.calibration.b, dtype=float)
+            if payload.area_intervals:
+                intervals = [(item[0], item[1]) for item in payload.area_intervals]
+            else:
+                intervals = [
+                    (f.nm_left, f.nm_right) for f in payload.calibration.feature_defs
+                    if f.kind == "area_interval" and f.nm_left is not None and f.nm_right is not None
+                ]
+            if not intervals:
+                raise ValueError("缺少峰面积积分区间")
+            coeffs = estimate_by_peak_area(wavelength, absorbance, K, b, intervals)
+            concentrations = {
+                name: float(coef)
+                for name, coef in zip(payload.calibration.component_names, coeffs)
+            }
+            features = {"area_intervals": intervals}
+
+        elif method == "ratio_derivative_2c":
+            if payload.divisor_reference is None:
+                raise ValueError("缺少除数参考谱")
+            if not payload.ratio_methods:
+                raise ValueError("缺少比值导数标定配置")
+            divisor_abs = np.asarray(payload.divisor_reference.absorbance, dtype=float)
+            if divisor_abs.shape != absorbance.shape:
+                raise ValueError("除数参考谱与样品谱长度不一致")
+            for item in payload.ratio_methods:
+                if item.lambda_nm is None:
+                    raise ValueError("比值导数缺少计算波长")
+                y_val = ratio_derivative_feature(wavelength, absorbance, divisor_abs, item.lambda_nm)
+                if item.calib.k == 0:
+                    raise ValueError("标定斜率不能为0")
+                concentration = max((y_val - item.calib.b) / item.calib.k, 0.0)
+                concentrations[item.component] = float(concentration)
+                features[item.component] = {
+                    "lambda_nm": item.lambda_nm,
+                    "divisor_component": item.divisor_component or payload.divisor_component
+                }
+
+        elif method == "zero_cross_ratio_derivative_3c":
+            if payload.divisor_reference is None:
+                raise ValueError("缺少除数参考谱")
+            if not payload.zero_cross_methods:
+                raise ValueError("缺少零交点标定配置")
+            divisor_abs = np.asarray(payload.divisor_reference.absorbance, dtype=float)
+            if divisor_abs.shape != absorbance.shape:
+                raise ValueError("除数参考谱与样品谱长度不一致")
+            for item in payload.zero_cross_methods:
+                if item.lambda_nm is None:
+                    raise ValueError("零交点法缺少计算波长")
+                y_val = ratio_derivative_feature(wavelength, absorbance, divisor_abs, item.lambda_nm)
+                if item.calib.k == 0:
+                    raise ValueError("标定斜率不能为0")
+                concentration = max((y_val - item.calib.b) / item.calib.k, 0.0)
+                concentrations[item.component] = float(concentration)
+                features[item.component] = {
+                    "lambda_nm": item.lambda_nm,
+                    "divisor_component": item.divisor_component or payload.divisor_component
+                }
+        else:
+            raise ValueError("未知的浓度分析方法")
+
+        return ConcentrationAnalysisResponse(
+            method=method,
+            concentrations=concentrations,
+            features=features
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
