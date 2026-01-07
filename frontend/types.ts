@@ -59,6 +59,12 @@ export interface ConcentrationResult {
     };
 }
 
+export interface ConcentrationMethodResult {
+    method: string;
+    concentrations: Record<string, number>;
+    features?: Record<string, any>;
+}
+
 export interface FabricParams {
     fabricType: string;
     weight: number; // grams

@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import { ProcessedData, ProcessingParams, HistoryItem, ConcentrationResult, User } from '../types';
+import { ProcessedData, ProcessingParams, HistoryItem, ConcentrationResult, ConcentrationMethodResult, User } from '../types';
 
 const SESSION_KEY = 'spectral_app_session';
 const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
@@ -161,6 +161,17 @@ export const analyzeConcentration = async (
       standards: standardFilenames,
     });
     return data as ConcentrationResult;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+};
+
+export const analyzeConcentrationMethods = async (
+  payload: Record<string, any>
+): Promise<ConcentrationMethodResult> => {
+  try {
+    const { data } = await api.post('/analysis/concentration-methods', payload);
+    return data as ConcentrationMethodResult;
   } catch (error) {
     throw normalizeError(error);
   }
