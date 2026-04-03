@@ -13,9 +13,11 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
     T: true,
     A: true
   });
+  const [rangeMin, setRangeMin] = useState<string>('');
+  const [rangeMax, setRangeMax] = useState<string>('');
 
   // Transform data for Recharts (array of objects)
-  const chartData = useMemo(() => {
+  const rawChartData = useMemo(() => {
     if (!data || !data.data.lambda) return [];
     return data.data.lambda.map((lambda, i) => ({
       lambda,
@@ -24,6 +26,20 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
       A: data.data.A[i],
     }));
   }, [data]);
+
+  const chartData = useMemo(() => {
+    if (!rawChartData.length) return [];
+    const min = Number(rangeMin);
+    const max = Number(rangeMax);
+    const hasMin = rangeMin.trim() !== '' && !Number.isNaN(min);
+    const hasMax = rangeMax.trim() !== '' && !Number.isNaN(max);
+
+    return rawChartData.filter((row) => {
+      if (hasMin && row.lambda < min) return false;
+      if (hasMax && row.lambda > max) return false;
+      return true;
+    });
+  }, [rawChartData, rangeMin, rangeMax]);
 
   const toggleLine = (key: keyof typeof visibleLines) => {
     setVisibleLines(prev => ({ ...prev, [key]: !prev[key] }));
@@ -49,7 +65,7 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
       <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
         <div>
             <h3 className="text-xl font-bold text-slate-100">{data.meta.name || "Analysis Result"}</h3>
-            <div className="flex gap-4 mt-2">
+          <div className="flex gap-4 mt-2">
                 <label className="flex items-center space-x-1 text-xs text-slate-400 cursor-pointer hover:text-slate-200">
                     <input type="checkbox" checked={visibleLines.I_corr} onChange={() => toggleLine('I_corr')} className="rounded bg-slate-800 border-slate-600 text-blue-500 focus:ring-blue-500 focus:ring-offset-slate-900"/>
                     <span className={visibleLines.I_corr ? "text-blue-400" : ""}>I_corr</span>
@@ -64,13 +80,42 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
                 </label>
             </div>
         </div>
-        <button 
-            onClick={downloadCSV}
-            className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-slate-200 rounded-md text-sm hover:bg-slate-700 transition-colors border border-slate-700"
-        >
-            <ArrowDownTrayIcon className="w-4 h-4" />
-            Export CSV
-        </button>
+        <div className="flex items-end gap-2">
+          <div>
+            <label className="block text-[11px] text-slate-500 mb-1">波长最小值</label>
+            <input
+              value={rangeMin}
+              onChange={(e) => setRangeMin(e.target.value)}
+              placeholder="例如 350"
+              className="w-24 bg-slate-800 border-slate-700 rounded-md text-xs text-slate-200"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] text-slate-500 mb-1">波长最大值</label>
+            <input
+              value={rangeMax}
+              onChange={(e) => setRangeMax(e.target.value)}
+              placeholder="例如 800"
+              className="w-24 bg-slate-800 border-slate-700 rounded-md text-xs text-slate-200"
+            />
+          </div>
+          <button
+            onClick={() => {
+              setRangeMin('');
+              setRangeMax('');
+            }}
+            className="px-3 py-2 text-xs bg-slate-800 text-slate-300 rounded-md hover:bg-slate-700 border border-slate-700"
+          >
+            重置
+          </button>
+          <button 
+              onClick={downloadCSV}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-slate-200 rounded-md text-sm hover:bg-slate-700 transition-colors border border-slate-700"
+          >
+              <ArrowDownTrayIcon className="w-4 h-4" />
+              Export CSV
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 min-h-[400px]">

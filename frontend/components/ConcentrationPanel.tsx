@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { HistoryItem, ConcentrationResult, ConcentrationMethodResult } from '../types';
+import { HistoryItem, ConcentrationResult, ConcentrationMethodResult, ProcessedData } from '../types';
 import { fetchHistoryList, analyzeConcentration, analyzeConcentrationMethods, fetchHistoryItem, updateHistoryItem, deleteHistoryItem } from '../services/api';
-import { BeakerIcon, PlayIcon, BookOpenIcon, TrashIcon, CheckIcon, XMarkIcon, PencilSquareIcon, DocumentTextIcon, TableCellsIcon, ArchiveBoxIcon } from '@heroicons/react/24/outline';
+import { BeakerIcon, PlayIcon, BookOpenIcon, TrashIcon, CheckIcon, XMarkIcon, PencilSquareIcon, DocumentTextIcon, TableCellsIcon, ArchiveBoxIcon, EyeIcon } from '@heroicons/react/24/outline';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 
 type Tab = 'analysis' | 'standard-library' | 'sample-library';
@@ -40,6 +40,10 @@ export const ConcentrationPanel: React.FC = () => {
     const [editForm, setEditForm] = useState<{name: string, concentration: string, type: string}>({
         name: '', concentration: '', type: 'standard'
     });
+    const [viewingItemName, setViewingItemName] = useState<string | null>(null);
+    const [viewingItemData, setViewingItemData] = useState<ProcessedData | null>(null);
+    const [viewRangeMin, setViewRangeMin] = useState<string>('');
+    const [viewRangeMax, setViewRangeMax] = useState<string>('');
 
     useEffect(() => {
         loadHistory();
@@ -330,6 +334,40 @@ export const ConcentrationPanel: React.FC = () => {
             }
         }
     };
+
+    const handleView = async (filename: string) => {
+        setViewingItemName(filename);
+        setViewingItemData(null);
+        setViewRangeMin('');
+        setViewRangeMax('');
+        try {
+            const detail = await fetchHistoryItem(filename);
+            setViewingItemData(detail);
+        } catch (e) {
+            alert("加载光谱详情失败");
+            setViewingItemName(null);
+        }
+    };
+
+    const viewedChartData = useMemo(() => {
+        if (!viewingItemData) return [];
+        const min = Number(viewRangeMin);
+        const max = Number(viewRangeMax);
+        const hasMin = viewRangeMin.trim() !== '' && !Number.isNaN(min);
+        const hasMax = viewRangeMax.trim() !== '' && !Number.isNaN(max);
+        return viewingItemData.data.lambda
+            .map((lambda, i) => ({
+                lambda,
+                A: viewingItemData.data.A[i],
+                T: viewingItemData.data.T[i],
+                I_corr: viewingItemData.data.I_corr[i],
+            }))
+            .filter((point) => {
+                if (hasMin && point.lambda < min) return false;
+                if (hasMax && point.lambda > max) return false;
+                return true;
+            });
+    }, [viewRangeMax, viewRangeMin, viewingItemData]);
 
     return (
         <div className="max-w-7xl mx-auto flex flex-col h-full gap-4 text-slate-300">
@@ -875,6 +913,13 @@ export const ConcentrationPanel: React.FC = () => {
                                                         >
                                                             <PencilSquareIcon className="w-5 h-5" />
                                                         </button>
+                                                        <button
+                                                            onClick={() => handleView(item.filename)}
+                                                            className="text-slate-300 hover:text-indigo-300"
+                                                            title="View"
+                                                        >
+                                                            <EyeIcon className="w-5 h-5" />
+                                                        </button>
                                                         <button 
                                                             onClick={() => handleDelete(item.filename)}
                                                             className="text-red-500 hover:text-red-400"
@@ -890,6 +935,76 @@ export const ConcentrationPanel: React.FC = () => {
                                 ))}
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            )}
+
+            {viewingItemName && (
+                <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
+                    <div className="w-full max-w-5xl h-[80vh] bg-slate-900 border border-slate-700 rounded-lg shadow-xl flex flex-col">
+                        <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+                            <div>
+                                <h4 className="text-base font-semibold text-slate-100">光谱查看</h4>
+                                <p className="text-xs text-slate-500 mt-1">
+                                    {viewingItemData?.meta?.name || viewingItemName}
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => setViewingItemName(null)}
+                                className="text-slate-400 hover:text-slate-200"
+                            >
+                                <XMarkIcon className="w-5 h-5" />
+                            </button>
+                        </div>
+                        {!viewingItemData ? (
+                            <div className="flex-1 flex items-center justify-center text-slate-500">
+                                加载中...
+                            </div>
+                        ) : (
+                            <div className="flex-1 p-5 overflow-hidden flex flex-col gap-4">
+                                <div className="flex gap-2 items-end">
+                                    <div>
+                                        <label className="text-xs text-slate-500 block mb-1">波长最小值</label>
+                                        <input
+                                            value={viewRangeMin}
+                                            onChange={(e) => setViewRangeMin(e.target.value)}
+                                            className="w-28 bg-slate-800 border-slate-700 rounded-md text-sm text-slate-200"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-slate-500 block mb-1">波长最大值</label>
+                                        <input
+                                            value={viewRangeMax}
+                                            onChange={(e) => setViewRangeMax(e.target.value)}
+                                            className="w-28 bg-slate-800 border-slate-700 rounded-md text-sm text-slate-200"
+                                        />
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            setViewRangeMin('');
+                                            setViewRangeMax('');
+                                        }}
+                                        className="px-3 py-2 text-xs text-slate-300 bg-slate-800 border border-slate-700 rounded-md"
+                                    >
+                                        重置范围
+                                    </button>
+                                </div>
+                                <div className="flex-1 min-h-[300px]">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <LineChart data={viewedChartData}>
+                                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                                            <XAxis dataKey="lambda" stroke="#475569" tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                                            <YAxis stroke="#475569" tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                                            <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155' }} />
+                                            <Legend />
+                                            <Line type="monotone" dataKey="A" stroke="#ef4444" dot={false} name="Absorbance" />
+                                            <Line type="monotone" dataKey="T" stroke="#10b981" dot={false} name="Transmittance" />
+                                            <Line type="monotone" dataKey="I_corr" stroke="#3b82f6" dot={false} name="I_corr" />
+                                        </LineChart>
+                                    </ResponsiveContainer>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
