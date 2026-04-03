@@ -166,6 +166,7 @@ async def export_batch_zip():
 
     mem = io.BytesIO()
     with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        used_names: dict[str, int] = {}
         for item in histories:
             try:
                 obj = load_json(item["name"])
@@ -173,7 +174,12 @@ async def export_batch_zip():
                 if data:
                     df = pd.DataFrame(data)
                     csv_bytes = df.to_csv(index=False).encode("utf-8")
-                    zf.writestr(f"{item['name']}.csv", csv_bytes)
+                    preferred_name = str(obj.get("meta", {}).get("name") or item.get("name") or "spectrum").strip()
+                    safe_name = "".join(ch for ch in preferred_name if ch not in '<>:"/\\|?*').strip() or "spectrum"
+                    seq = used_names.get(safe_name, 0)
+                    used_names[safe_name] = seq + 1
+                    export_name = safe_name if seq == 0 else f"{safe_name}_{seq + 1}"
+                    zf.writestr(f"{export_name}.csv", csv_bytes)
             except Exception:
                 pass
     mem.seek(0)
