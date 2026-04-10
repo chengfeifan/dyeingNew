@@ -107,3 +107,21 @@ class ConcentrationAnalysisResponse(BaseModel):
     method: str
     concentrations: Dict[str, float]
     features: Dict[str, Any] = {}
+
+class PcaLibraryRequest(BaseModel):
+    standard_names: Optional[List[str]] = None
+    n_components: int = 2
+
+class PcaModelPayload(BaseModel):
+    wavelength_nm: List[float]
+    mean: List[float]
+    components: List[List[float]]
+
+class PcaRealtimeSeries(BaseModel):
+    label: str
+    absorbance: List[float]
+
+class PcaRealtimeProjectRequest(BaseModel):
+    wavelength_nm: List[float]
+    realtime_series: List[PcaRealtimeSeries]
+    model: PcaModelPayload

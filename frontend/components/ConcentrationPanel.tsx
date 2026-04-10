@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { HistoryItem, ConcentrationResult, ConcentrationMethodResult, ProcessedData } from '../types';
-import { fetchHistoryList, analyzeConcentration, analyzeConcentrationMethods, fetchHistoryItem, updateHistoryItem, deleteHistoryItem } from '../services/api';
+import { fetchHistoryList, analyzeConcentration, analyzeConcentrationMethods, fetchHistoryItem, updateHistoryItem, deleteHistoryItem, reprocessHistorySpectrum } from '../services/api';
 import { BeakerIcon, PlayIcon, BookOpenIcon, TrashIcon, CheckIcon, XMarkIcon, PencilSquareIcon, DocumentTextIcon, TableCellsIcon, ArchiveBoxIcon, EyeIcon } from '@heroicons/react/24/outline';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 
@@ -39,6 +39,16 @@ export const ConcentrationPanel: React.FC = () => {
     const [editingItem, setEditingItem] = useState<string | null>(null);
     const [editForm, setEditForm] = useState<{name: string, concentration: string, type: string}>({
         name: '', concentration: '', type: 'standard'
+    });
+    const [editFiles, setEditFiles] = useState<{ sample: File | null; water: File | null; dark: File | null }>({
+        sample: null, water: null, dark: null
+    });
+    const [editProcessParams, setEditProcessParams] = useState({
+        enableSmoothing: false,
+        smoothWindow: 11,
+        smoothOrder: 3,
+        rangeMinNm: 380,
+        rangeMaxNm: 780,
     });
     const [viewingItemName, setViewingItemName] = useState<string | null>(null);
     const [viewingItemData, setViewingItemData] = useState<ProcessedData | null>(null);
@@ -301,14 +311,30 @@ export const ConcentrationPanel: React.FC = () => {
             concentration: item.meta?.concentration || '',
             type: item.meta?.save_type || 'multicomponent'
         });
+        setEditFiles({ sample: null, water: null, dark: null });
+        setEditProcessParams({
+            enableSmoothing: Boolean(item.meta?.smooth_enabled),
+            smoothWindow: Number(item.meta?.smooth_window) || 11,
+            smoothOrder: Number(item.meta?.smooth_order) || 3,
+            rangeMinNm: Number(item.meta?.range_min_nm) || 380,
+            rangeMaxNm: Number(item.meta?.range_max_nm) || 780,
+        });
     };
 
     const cancelEdit = () => {
         setEditingItem(null);
+        setEditFiles({ sample: null, water: null, dark: null });
     };
 
     const saveEdit = async (filename: string) => {
         try {
+            if (editFiles.sample && editFiles.water && editFiles.dark) {
+                await reprocessHistorySpectrum(filename, {
+                    sample: editFiles.sample,
+                    water: editFiles.water,
+                    dark: editFiles.dark,
+                }, editProcessParams);
+            }
             await updateHistoryItem(filename, {
                 name: editForm.name,
                 concentration: editForm.concentration,
@@ -600,7 +626,10 @@ export const ConcentrationPanel: React.FC = () => {
                             <select 
                                 className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
                                 value={selectedSample}
-                                onChange={(e) => setSelectedSample(e.target.value)}
+                                onChange={(e) => {
+                                    setSelectedSample(e.target.value);
+                                    setSelectedStandards([]);
+                                }}
                             >
                                 <option value="">-- 请选择历史记录 --</option>
                                 {samples.map(s => (
@@ -846,6 +875,34 @@ export const ConcentrationPanel: React.FC = () => {
                                                         value={editForm.name}
                                                         onChange={(e) => setEditForm({...editForm, name: e.target.value})}
                                                     />
+                                                    <div className="mt-2 space-y-2">
+                                                        <div className="text-xs text-slate-500">可选：重新上传光谱并重算</div>
+                                                        {(['sample', 'water', 'dark'] as const).map((key) => (
+                                                            <input
+                                                                key={key}
+                                                                type="file"
+                                                                accept=".spc"
+                                                                onChange={(e) => setEditFiles((prev) => ({ ...prev, [key]: e.target.files?.[0] || null }))}
+                                                                className="block w-full text-xs text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:bg-slate-800 file:text-indigo-400 bg-slate-950/50 rounded-md border border-slate-700"
+                                                            />
+                                                        ))}
+                                                        <div className="grid grid-cols-2 gap-2">
+                                                            <input
+                                                                type="number"
+                                                                value={editProcessParams.rangeMinNm}
+                                                                onChange={(e) => setEditProcessParams((prev) => ({ ...prev, rangeMinNm: Number(e.target.value) || 380 }))}
+                                                                placeholder="最小波长"
+                                                                className="bg-slate-800 border-slate-600 rounded text-xs w-full text-slate-200"
+                                                            />
+                                                            <input
+                                                                type="number"
+                                                                value={editProcessParams.rangeMaxNm}
+                                                                onChange={(e) => setEditProcessParams((prev) => ({ ...prev, rangeMaxNm: Number(e.target.value) || 780 }))}
+                                                                placeholder="最大波长"
+                                                                className="bg-slate-800 border-slate-600 rounded text-xs w-full text-slate-200"
+                                                            />
+                                                        </div>
+                                                    </div>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     <select 

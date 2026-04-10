@@ -20,6 +20,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
     enableSmoothing: false,
     smoothWindow: 11,
     smoothOrder: 3,
+    rangeMinNm: 380,
+    rangeMaxNm: 780,
   });
 
   // Save State
@@ -74,6 +76,30 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
               </div>
             </div>
           ))}
+        </div>
+      </div>
+
+      <div className="border-t border-slate-800 pt-4">
+        <h2 className="text-lg font-semibold text-slate-100 mb-4">光谱范围</h2>
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">最小波长 (nm)</label>
+            <input
+              type="number"
+              value={params.rangeMinNm}
+              onChange={(e) => setParams({ ...params, rangeMinNm: parseFloat(e.target.value) || 380 })}
+              className="w-full bg-slate-800 border-slate-700 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm text-slate-200"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">最大波长 (nm)</label>
+            <input
+              type="number"
+              value={params.rangeMaxNm}
+              onChange={(e) => setParams({ ...params, rangeMaxNm: parseFloat(e.target.value) || 780 })}
+              className="w-full bg-slate-800 border-slate-700 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm text-slate-200"
+            />
+          </div>
         </div>
       </div>
 

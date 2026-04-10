@@ -10,18 +10,20 @@ import pandas as pd
 from schemas import (
     SavePayload, HistoryItem, HistoryUpdatePayload,
     UserLogin, UserCreate, UserPublic, ConcentrationRequest,
-    ConcentrationAnalysisRequest, ConcentrationAnalysisResponse
+    ConcentrationAnalysisRequest, ConcentrationAnalysisResponse,
+    PcaLibraryRequest, PcaRealtimeProjectRequest
 )
 from core import (
     read_spc_first_xy, interp_to, compute_corrected,
     poly_smooth, build_export_columns, ndarray_to_list_dict,
     solve_non_negative_least_squares, estimate_by_lambda_equations,
-    estimate_by_peak_area, ratio_derivative_feature
+    estimate_by_peak_area, ratio_derivative_feature,
+    apply_wavelength_range, pca_fit, pca_transform
 )
 from storage import (
     save_json, list_history, load_json, rename_history,
     update_history_meta, delete_history, authenticate_user,
-    list_users, create_user, delete_user
+    list_users, create_user, delete_user, replace_history_data
 )
 
 app = FastAPI(title="Spectra Processor API", version="1.0.0")
@@ -49,6 +51,8 @@ async def process_spectra(
     smooth_enabled: bool = Form(False, alias="enableSmoothing"),
     smooth_window: int = Form(11, alias="smoothWindow"),
     smooth_order: int = Form(3, alias="smoothOrder"),
+    range_min_nm: float = Form(380.0, alias="rangeMinNm"),
+    range_max_nm: float = Form(780.0, alias="rangeMaxNm"),
 ):
     try:
         tmp_dir = Path("./_tmp"); tmp_dir.mkdir(exist_ok=True)
@@ -78,6 +82,9 @@ async def process_spectra(
             if out_A:
                 A = poly_smooth(A, window=smooth_window, order=smooth_order)
 
+        x_s, I_corr, T, A = apply_wavelength_range(
+            x_s, I_corr, T, A, min_nm=range_min_nm, max_nm=range_max_nm
+        )
         cols = build_export_columns(x_s, I_corr, T, A, out_corr, out_T, out_A)
         meta = {
             "name": sample.filename.replace(".spc", ""),
@@ -85,6 +92,8 @@ async def process_spectra(
             "smooth_enabled": smooth_enabled,
             "smooth_window": smooth_window,
             "smooth_order": smooth_order,
+            "range_min_nm": range_min_nm,
+            "range_max_nm": range_max_nm,
             "files": {
                 "sample": sample.filename,
                 "water": water.filename,
@@ -92,6 +101,57 @@ async def process_spectra(
             }
         }
         return {"data": ndarray_to_list_dict(cols), "meta": meta}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/history/{name}/reprocess")
+async def reprocess_history_item(
+    name: str,
+    sample: UploadFile = File(...),
+    water: UploadFile = File(...),
+    dark: UploadFile = File(...),
+    smooth_enabled: bool = Form(False, alias="enableSmoothing"),
+    smooth_window: int = Form(11, alias="smoothWindow"),
+    smooth_order: int = Form(3, alias="smoothOrder"),
+    range_min_nm: float = Form(380.0, alias="rangeMinNm"),
+    range_max_nm: float = Form(780.0, alias="rangeMaxNm"),
+):
+    try:
+        tmp_dir = Path("./_tmp"); tmp_dir.mkdir(exist_ok=True)
+        async def to_path(up: UploadFile) -> Path:
+            p = tmp_dir / up.filename
+            with open(p, "wb") as f:
+                f.write(await up.read())
+            return p
+        p_s = await to_path(sample)
+        p_w = await to_path(water)
+        p_d = await to_path(dark)
+        x_s, y_s = read_spc_first_xy(p_s)
+        x_w, y_w = read_spc_first_xy(p_w)
+        x_d, y_d = read_spc_first_xy(p_d)
+        y_wi = interp_to(x_w, y_w, x_s)
+        y_di = interp_to(x_d, y_d, x_s)
+        I_corr, T, A = compute_corrected(y_s, y_wi, y_di)
+        if smooth_enabled:
+            I_corr = poly_smooth(I_corr, window=smooth_window, order=smooth_order)
+            T = poly_smooth(T, window=smooth_window, order=smooth_order)
+            A = poly_smooth(A, window=smooth_window, order=smooth_order)
+        x_s, I_corr, T, A = apply_wavelength_range(
+            x_s, I_corr, T, A, min_nm=range_min_nm, max_nm=range_max_nm
+        )
+        data = ndarray_to_list_dict(build_export_columns(x_s, I_corr, T, A, True, True, True))
+        meta = {
+            "smooth_enabled": smooth_enabled,
+            "smooth_window": smooth_window,
+            "smooth_order": smooth_order,
+            "range_min_nm": range_min_nm,
+            "range_max_nm": range_max_nm,
+            "files": {"sample": sample.filename, "water": water.filename, "dark": dark.filename}
+        }
+        replace_history_data(name, data, meta)
+        return load_json(name)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -332,6 +392,79 @@ async def analyze_concentration_methods(payload: ConcentrationAnalysisRequest):
             concentrations=concentrations,
             features=features
         )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/analysis/pca/library")
+async def analyze_pca_library(payload: PcaLibraryRequest):
+    try:
+        all_history = list_history()
+        standard_items = [item for item in all_history if item.get("meta", {}).get("save_type") == "standard"]
+        names = payload.standard_names or [item["name"] for item in standard_items]
+        if not names:
+            raise ValueError("标准库为空，无法进行 PCA 分析")
+        spectra = []
+        labels = []
+        wavelength_base = None
+        for name in names:
+            obj = load_json(name)
+            data = obj.get("data", {})
+            wavelength = np.asarray(data.get("lambda"), dtype=float)
+            absorbance = np.asarray(data.get("A"), dtype=float)
+            if wavelength.size == 0 or absorbance.size == 0:
+                continue
+            if wavelength_base is None:
+                wavelength_base = wavelength
+                spectra.append(absorbance)
+            else:
+                spectra.append(interp_to(wavelength, absorbance, wavelength_base))
+            labels.append(obj.get("meta", {}).get("name") or name)
+        if wavelength_base is None or len(spectra) < 2:
+            raise ValueError("可用标准谱不足，至少需要 2 条")
+        matrix = np.vstack(spectra)
+        pca_result = pca_fit(matrix, n_components=payload.n_components)
+        scores = pca_result["scores"]
+        points = [
+            {"label": label, "pc1": float(scores[i, 0]), "pc2": float(scores[i, 1] if scores.shape[1] > 1 else 0.0)}
+            for i, label in enumerate(labels)
+        ]
+        return {
+            "points": points,
+            "explained_variance_ratio": pca_result["explained_variance_ratio"].tolist(),
+            "model": {
+                "wavelength_nm": wavelength_base.tolist(),
+                "mean": pca_result["mean"].tolist(),
+                "components": pca_result["components"].tolist(),
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/analysis/pca/realtime")
+async def project_realtime_pca(payload: PcaRealtimeProjectRequest):
+    try:
+        model_wl = np.asarray(payload.model.wavelength_nm, dtype=float)
+        if model_wl.size == 0:
+            raise ValueError("PCA 模型缺少波长轴")
+        source_wl = np.asarray(payload.wavelength_nm, dtype=float)
+        if source_wl.size == 0:
+            raise ValueError("实时光谱缺少波长轴")
+        rows = []
+        labels = []
+        for series in payload.realtime_series:
+            absorbance = np.asarray(series.absorbance, dtype=float)
+            if absorbance.shape[0] != source_wl.shape[0]:
+                raise ValueError(f"实时光谱 {series.label} 与波长长度不一致")
+            rows.append(interp_to(source_wl, absorbance, model_wl))
+            labels.append(series.label)
+        if not rows:
+            raise ValueError("未提供实时光谱数据")
+        projected = pca_transform(np.vstack(rows), np.asarray(payload.model.mean), np.asarray(payload.model.components))
+        path = [
+            {"label": labels[i], "pc1": float(projected[i, 0]), "pc2": float(projected[i, 1] if projected.shape[1] > 1 else 0.0)}
+            for i in range(len(labels))
+        ]
+        return {"path": path}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

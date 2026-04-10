@@ -27,6 +27,8 @@ export interface ProcessingParams {
   enableSmoothing: boolean;
   smoothWindow: number;
   smoothOrder: number;
+  rangeMinNm: number;
+  rangeMaxNm: number;
 }
 
 export interface HistoryItem {
@@ -83,4 +85,22 @@ export interface User {
     role: 'admin' | 'user';
     lastLogin: string;
     password?: string; // Optional for frontend handling
+}
+
+export interface PcaPoint {
+  label: string;
+  pc1: number;
+  pc2: number;
+}
+
+export interface PcaModel {
+  wavelength_nm: number[];
+  mean: number[];
+  components: number[][];
+}
+
+export interface PcaLibraryResult {
+  points: PcaPoint[];
+  explained_variance_ratio: number[];
+  model: PcaModel;
 }

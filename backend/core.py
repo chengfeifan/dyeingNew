@@ -78,6 +78,61 @@ def build_export_columns(x, I_corr, T, A, out_corr=True, out_T=True, out_A=True)
         cols["A"] = A
     return cols
 
+def apply_wavelength_range(
+    wavelength: np.ndarray,
+    *spectra: np.ndarray,
+    min_nm: float = 380.0,
+    max_nm: float = 780.0,
+) -> Tuple[np.ndarray, ...]:
+    wl = np.asarray(wavelength, dtype=float)
+    if max_nm < min_nm:
+        min_nm, max_nm = max_nm, min_nm
+    mask = (wl >= float(min_nm)) & (wl <= float(max_nm))
+    if not np.any(mask):
+        raise ValueError(f"所选波长范围 {min_nm}-{max_nm}nm 无有效数据点")
+    trimmed = [wl[mask]]
+    for spectrum in spectra:
+        arr = np.asarray(spectrum, dtype=float)
+        if arr.shape != wl.shape:
+            raise ValueError("光谱数据长度与波长轴不一致")
+        trimmed.append(arr[mask])
+    return tuple(trimmed)
+
+def pca_fit(data_matrix: np.ndarray, n_components: int = 2) -> Dict[str, np.ndarray]:
+    X = np.asarray(data_matrix, dtype=float)
+    if X.ndim != 2:
+        raise ValueError("PCA 输入矩阵必须是二维")
+    n_samples, n_features = X.shape
+    if n_samples < 2 or n_features < 2:
+        raise ValueError("PCA 至少需要 2 条样本且每条样本至少 2 个特征点")
+    k = max(1, min(n_components, n_samples, n_features))
+    mean = np.mean(X, axis=0)
+    centered = X - mean
+    _, singular_values, vt = np.linalg.svd(centered, full_matrices=False)
+    components = vt[:k]
+    explained_variance = (singular_values ** 2) / max(n_samples - 1, 1)
+    total_var = np.sum(explained_variance)
+    ratios = explained_variance[:k] / total_var if total_var > 0 else np.zeros(k)
+    scores = centered @ components.T
+    return {
+        "mean": mean,
+        "components": components,
+        "scores": scores,
+        "explained_variance_ratio": ratios,
+    }
+
+def pca_transform(data_matrix: np.ndarray, mean: np.ndarray, components: np.ndarray) -> np.ndarray:
+    X = np.asarray(data_matrix, dtype=float)
+    mu = np.asarray(mean, dtype=float)
+    comp = np.asarray(components, dtype=float)
+    if X.ndim != 2:
+        raise ValueError("待投影数据必须是二维")
+    if mu.ndim != 1 or comp.ndim != 2:
+        raise ValueError("PCA 模型参数格式错误")
+    if X.shape[1] != mu.shape[0] or comp.shape[1] != mu.shape[0]:
+        raise ValueError("待投影数据维度与 PCA 模型不匹配")
+    return (X - mu) @ comp.T
+
 def ndarray_to_list_dict(d: Dict[str, np.ndarray]) -> Dict[str, list]:
     return {k: np.asarray(v, dtype=float).tolist() for k, v in d.items()}
 

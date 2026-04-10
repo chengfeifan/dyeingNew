@@ -276,6 +276,26 @@ def update_history_meta(name: str, updates: Dict[str, Any]) -> Dict[str, str]:
         )
     return {"name": name, "timestamp": ts, "meta": meta}
 
+def replace_history_data(name: str, data: Dict[str, Any], meta: Dict[str, Any]) -> Dict[str, str]:
+    with _get_conn() as conn:
+        row = _resolve_history_row(conn, name)
+        if not row:
+            raise FileNotFoundError(name)
+        current_meta = json.loads(row["meta"])
+        next_meta = {**current_meta, **(meta or {})}
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        next_meta["timestamp"] = ts
+        conn.execute(
+            "UPDATE history SET data = ?, meta = ?, timestamp = ? WHERE id = ?",
+            (
+                json.dumps(data, ensure_ascii=False),
+                json.dumps(next_meta, ensure_ascii=False),
+                ts,
+                row["id"],
+            ),
+        )
+    return {"name": name, "timestamp": ts}
+
 def delete_history(name: str) -> None:
     with _get_conn() as conn:
         row = _resolve_history_row(conn, name)
