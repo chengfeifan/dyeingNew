@@ -78,6 +78,8 @@ class UserPublic(BaseModel):
 class ConcentrationRequest(BaseModel):
     sample: str = Field(..., description="需要解析的样品名称")
     standards: List[str] = Field(..., description="标准样名称列表")
+    range_min_nm: float = Field(400.0, description="解析波长下限（nm）")
+    range_max_nm: float = Field(780.0, description="解析波长上限（nm）")
 
     @validator("standards")
     def _validate_standards(cls, v: List[str]) -> List[str]:
@@ -94,6 +96,8 @@ class ComponentMethodPayload(BaseModel):
 class ConcentrationAnalysisRequest(BaseModel):
     method: str = Field(..., description="lambda_equations/peak_area/ratio_derivative_2c/zero_cross_ratio_derivative_3c")
     sample: SpectrumPayload
+    range_min_nm: float = Field(400.0, description="解析波长下限（nm）")
+    range_max_nm: float = Field(780.0, description="解析波长上限（nm）")
     calibration: Optional[MatrixCalibPayload] = None
     lambda_points: Optional[List[float]] = None
     area_intervals: Optional[List[List[float]]] = None

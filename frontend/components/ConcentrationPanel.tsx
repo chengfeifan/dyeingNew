@@ -31,6 +31,8 @@ export const ConcentrationPanel: React.FC = () => {
     const [areaIntervalsInput, setAreaIntervalsInput] = useState<string>('');
     const [divisorStandard, setDivisorStandard] = useState<string>('');
     const [divisorComponent, setDivisorComponent] = useState<string>('');
+    const [analysisRangeMinNm, setAnalysisRangeMinNm] = useState<string>('400');
+    const [analysisRangeMaxNm, setAnalysisRangeMaxNm] = useState<string>('780');
     const [ratioRows, setRatioRows] = useState<RatioMethodRow[]>([
         { component: '', lambda_nm: '', k: '', b: '' }
     ]);
@@ -128,11 +130,16 @@ export const ConcentrationPanel: React.FC = () => {
         setError(null);
         setResult(null);
         try {
+            const rangeMinNm = Number(analysisRangeMinNm);
+            const rangeMaxNm = Number(analysisRangeMaxNm);
+            if (Number.isNaN(rangeMinNm) || Number.isNaN(rangeMaxNm)) {
+                throw new Error("请输入有效的解析波长范围");
+            }
             if (analysisMethod === 'nnls') {
                 if (selectedStandards.length === 0) {
                     throw new Error("请选择至少一个标准品");
                 }
-                const res = await analyzeConcentration(selectedSample, selectedStandards);
+                const res = await analyzeConcentration(selectedSample, selectedStandards, rangeMinNm, rangeMaxNm);
                 setResult(res);
                 return;
             }
@@ -146,6 +153,8 @@ export const ConcentrationPanel: React.FC = () => {
 
             const payload: Record<string, any> = {
                 method: analysisMethod,
+                range_min_nm: rangeMinNm,
+                range_max_nm: rangeMaxNm,
                 sample: {
                     wavelength_nm: wavelength,
                     absorbance,
@@ -617,6 +626,30 @@ export const ConcentrationPanel: React.FC = () => {
                                 )}
                             </div>
                         )}
+                        <div className="bg-slate-900 p-5 rounded-lg shadow-sm border border-slate-800 space-y-3">
+                            <h3 className="font-semibold text-slate-200">光谱解析范围</h3>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-xs text-slate-400 block mb-1">起始波长 (nm)</label>
+                                    <input
+                                        type="number"
+                                        value={analysisRangeMinNm}
+                                        onChange={(e) => setAnalysisRangeMinNm(e.target.value)}
+                                        className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-slate-400 block mb-1">结束波长 (nm)</label>
+                                    <input
+                                        type="number"
+                                        value={analysisRangeMaxNm}
+                                        onChange={(e) => setAnalysisRangeMaxNm(e.target.value)}
+                                        className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
+                                    />
+                                </div>
+                            </div>
+                            <p className="text-xs text-slate-500">默认范围：400–780 nm</p>
+                        </div>
                         {/* 1. Select Sample */}
                         <div className="bg-slate-900 p-5 rounded-lg shadow-sm border border-slate-800">
                             <h3 className="font-semibold text-slate-200 mb-3 flex items-center gap-2">

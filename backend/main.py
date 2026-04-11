@@ -255,12 +255,28 @@ async def analyze_concentration(payload: ConcentrationRequest):
         raise HTTPException(status_code=404, detail=str(e))
     try:
         sample_data = sample_obj.get("data", {})
+        sample_lambda = np.asarray(sample_data.get("lambda"), dtype=float)
         sample_A = np.asarray(sample_data.get("A"), dtype=float)
-        if sample_A.size == 0 or sample_A.ndim != 1:
+        if sample_lambda.size == 0 or sample_A.size == 0 or sample_A.ndim != 1:
             raise ValueError("样品缺少A光谱数据")
+        sample_lambda, sample_A = apply_wavelength_range(
+            sample_lambda,
+            sample_A,
+            min_nm=payload.range_min_nm,
+            max_nm=payload.range_max_nm
+        )
         standards_A = []
         for obj in standard_objs:
+            std_lambda = np.asarray(obj.get("data", {}).get("lambda"), dtype=float)
             arr = np.asarray(obj.get("data", {}).get("A"), dtype=float)
+            if std_lambda.size == 0:
+                raise ValueError("标准样缺少波长轴数据")
+            _, arr = apply_wavelength_range(
+                std_lambda,
+                arr,
+                min_nm=payload.range_min_nm,
+                max_nm=payload.range_max_nm
+            )
             if arr.shape != sample_A.shape:
                 raise ValueError("标准样与样品的光谱长度不一致")
             standards_A.append(arr)
@@ -281,7 +297,7 @@ async def analyze_concentration(payload: ConcentrationRequest):
             "components": components,
             "metrics": {"rmse": rmse, "residual_norm": residual_norm},
             "chart_data": {
-                "lambda": sample_data.get("lambda"),
+                "lambda": sample_lambda.tolist(),
                 "original": sample_A.tolist(),
                 "fitted": fitted.tolist(),
                 "residual": residual.tolist()
@@ -297,6 +313,12 @@ async def analyze_concentration_methods(payload: ConcentrationAnalysisRequest):
         absorbance = np.asarray(payload.sample.absorbance, dtype=float)
         if wavelength.size == 0 or absorbance.size == 0:
             raise ValueError("光谱数据不能为空")
+        wavelength, absorbance = apply_wavelength_range(
+            wavelength,
+            absorbance,
+            min_nm=payload.range_min_nm,
+            max_nm=payload.range_max_nm
+        )
         method = payload.method
         concentrations = {}
         features = {}
@@ -348,8 +370,15 @@ async def analyze_concentration_methods(payload: ConcentrationAnalysisRequest):
                 raise ValueError("缺少除数参考谱")
             if not payload.ratio_methods:
                 raise ValueError("缺少比值导数标定配置")
+            divisor_wl = np.asarray(payload.divisor_reference.wavelength_nm, dtype=float)
             divisor_abs = np.asarray(payload.divisor_reference.absorbance, dtype=float)
-            if divisor_abs.shape != absorbance.shape:
+            divisor_wl, divisor_abs = apply_wavelength_range(
+                divisor_wl,
+                divisor_abs,
+                min_nm=payload.range_min_nm,
+                max_nm=payload.range_max_nm
+            )
+            if divisor_abs.shape != absorbance.shape or divisor_wl.shape != wavelength.shape:
                 raise ValueError("除数参考谱与样品谱长度不一致")
             for item in payload.ratio_methods:
                 if item.lambda_nm is None:
@@ -369,8 +398,15 @@ async def analyze_concentration_methods(payload: ConcentrationAnalysisRequest):
                 raise ValueError("缺少除数参考谱")
             if not payload.zero_cross_methods:
                 raise ValueError("缺少零交点标定配置")
+            divisor_wl = np.asarray(payload.divisor_reference.wavelength_nm, dtype=float)
             divisor_abs = np.asarray(payload.divisor_reference.absorbance, dtype=float)
-            if divisor_abs.shape != absorbance.shape:
+            divisor_wl, divisor_abs = apply_wavelength_range(
+                divisor_wl,
+                divisor_abs,
+                min_nm=payload.range_min_nm,
+                max_nm=payload.range_max_nm
+            )
+            if divisor_abs.shape != absorbance.shape or divisor_wl.shape != wavelength.shape:
                 raise ValueError("除数参考谱与样品谱长度不一致")
             for item in payload.zero_cross_methods:
                 if item.lambda_nm is None:
