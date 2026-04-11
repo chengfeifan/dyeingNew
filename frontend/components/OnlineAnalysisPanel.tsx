@@ -5,25 +5,86 @@ import { HistoryItem, PcaLibraryResult } from '../types';
 
 type CsvParsed = { wavelength: number[]; series: Array<{ label: string; absorbance: number[] }> };
 
-const parseCsv = async (file: File): Promise<CsvParsed> => {
+const splitColumns = (line: string): string[] => {
+  if (line.includes('\t')) return line.split('\t').map((item) => item.trim());
+  if (line.includes(',')) return line.split(',').map((item) => item.trim());
+  return line.split(/\s+/).map((item) => item.trim());
+};
+
+const normalizeHeader = (value: string): string => value.trim().toLowerCase();
+
+const intensityToAbsorbance = (intensity: number[]): number[] => {
+  const safeIntensity = intensity.map((value) => (Number.isFinite(value) ? Math.max(value, 1e-8) : 1e-8));
+  const i0 = Math.max(...safeIntensity);
+  const safeI0 = Math.max(i0, 1e-8);
+  return safeIntensity.map((value) => -Math.log10(value / safeI0));
+};
+
+const applyRange = (
+  wavelength: number[],
+  absorbance: number[],
+  rangeMin: number,
+  rangeMax: number
+): { wavelength: number[]; absorbance: number[] } => {
+  const left = Math.min(rangeMin, rangeMax);
+  const right = Math.max(rangeMin, rangeMax);
+  const selected = wavelength
+    .map((wl, idx) => ({ wl, ab: absorbance[idx] }))
+    .filter((point) => point.wl >= left && point.wl <= right);
+  if (!selected.length) {
+    throw new Error(`所选波长范围 ${left}-${right}nm 内无可用数据`);
+  }
+  return {
+    wavelength: selected.map((point) => point.wl),
+    absorbance: selected.map((point) => point.ab),
+  };
+};
+
+const parseCsv = async (file: File, rangeMin: number, rangeMax: number): Promise<CsvParsed> => {
   const text = await file.text();
   const rows = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   if (rows.length < 2) throw new Error('CSV 至少需要表头和一行数据');
-  const headers = rows[0].split(',').map((h) => h.trim());
+  const headers = splitColumns(rows[0]);
   if (headers.length < 2) throw new Error('CSV 至少包含 wavelength 和一条光谱列');
-  const labels = headers.slice(1).map((v, i) => v || `t${i + 1}`);
+  const normalizedHeaders = headers.map(normalizeHeader);
+  const wavelengthIndex = normalizedHeaders.findIndex((header) => ['wavelength', 'lambda', 'wl'].includes(header));
+  if (wavelengthIndex < 0) throw new Error('CSV 必须包含 wavelength 列');
+  const intensityIndex = normalizedHeaders.findIndex((header) => ['intensity', 'i_corr', 'i', 'signal'].includes(header));
+  const absorbanceIndex = normalizedHeaders.findIndex((header) => ['absorbance', 'a'].includes(header));
+  const hasSingleSeries = intensityIndex >= 0 || absorbanceIndex >= 0;
+  const labels = hasSingleSeries
+    ? [headers[intensityIndex >= 0 ? intensityIndex : absorbanceIndex] || 'realtime']
+    : headers.filter((_, idx) => idx !== wavelengthIndex).map((v, i) => v || `t${i + 1}`);
   const wavelength: number[] = [];
   const seriesValues = labels.map(() => [] as number[]);
   rows.slice(1).forEach((line) => {
-    const cols = line.split(',').map((c) => c.trim());
-    const wl = Number(cols[0]);
+    const cols = splitColumns(line);
+    const wl = Number(cols[wavelengthIndex]);
     if (Number.isNaN(wl)) return;
     wavelength.push(wl);
-    labels.forEach((_, idx) => {
-      seriesValues[idx].push(Number(cols[idx + 1] || 0));
+    if (hasSingleSeries) {
+      const rawValue = Number(cols[intensityIndex >= 0 ? intensityIndex : absorbanceIndex] || 0);
+      seriesValues[0].push(Number.isFinite(rawValue) ? rawValue : 0);
+      return;
+    }
+    let seriesCursor = 0;
+    headers.forEach((_, idx) => {
+      if (idx === wavelengthIndex) return;
+      const rawValue = Number(cols[idx] || 0);
+      seriesValues[seriesCursor].push(Number.isFinite(rawValue) ? rawValue : 0);
+      seriesCursor += 1;
     });
   });
-  return { wavelength, series: labels.map((label, idx) => ({ label, absorbance: seriesValues[idx] })) };
+  const parsedSeries = labels.map((label, idx) => {
+    const values = seriesValues[idx] || [];
+    const absorbance = hasSingleSeries && intensityIndex >= 0 ? intensityToAbsorbance(values) : values;
+    const ranged = applyRange(wavelength, absorbance, rangeMin, rangeMax);
+    return { label, absorbance: ranged.absorbance, wavelength: ranged.wavelength };
+  });
+  return {
+    wavelength: parsedSeries[0]?.wavelength || [],
+    series: parsedSeries.map((item) => ({ label: item.label, absorbance: item.absorbance })),
+  };
 };
 
 const TARGET_OPTIONS: Array<{ value: 'I_corr' | 'T' | 'A'; label: string }> = [
@@ -38,6 +99,8 @@ export const OnlineAnalysisPanel: React.FC = () => {
   const [standardItems, setStandardItems] = useState<HistoryItem[]>([]);
   const [selectedStandards, setSelectedStandards] = useState<string[]>([]);
   const [analysisTarget, setAnalysisTarget] = useState<'I_corr' | 'T' | 'A'>('A');
+  const [rangeMinNm, setRangeMinNm] = useState<number>(188);
+  const [rangeMaxNm, setRangeMaxNm] = useState<number>(800);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -76,7 +139,7 @@ export const OnlineAnalysisPanel: React.FC = () => {
     try {
       const csvFiles = Array.from(e.target.files).filter((file) => file.name.toLowerCase().endsWith('.csv'));
       if (!csvFiles.length) throw new Error('未检测到 CSV 文件');
-      const parsedSeries = await Promise.all(csvFiles.map(parseCsv));
+      const parsedSeries = await Promise.all(csvFiles.map((file) => parseCsv(file, rangeMinNm, rangeMaxNm)));
       const baseWavelength = parsedSeries[0].wavelength;
       if (!baseWavelength?.length) throw new Error('CSV 缺少有效波长数据');
       const mergedSeries = parsedSeries.map((parsed, index) => {
@@ -137,6 +200,22 @@ export const OnlineAnalysisPanel: React.FC = () => {
               ))}
             </select>
           </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="text-sm text-slate-400">在线数据光谱范围 (nm)</label>
+            <input
+              type="number"
+              value={rangeMinNm}
+              onChange={(e) => setRangeMinNm(Number(e.target.value || 0))}
+              className="w-28 bg-slate-800 border border-slate-700 rounded-md px-2 py-1 text-sm text-slate-200"
+            />
+            <span className="text-slate-500">~</span>
+            <input
+              type="number"
+              value={rangeMaxNm}
+              onChange={(e) => setRangeMaxNm(Number(e.target.value || 0))}
+              className="w-28 bg-slate-800 border border-slate-700 rounded-md px-2 py-1 text-sm text-slate-200"
+            />
+          </div>
 
           <div className="bg-slate-950/40 border border-slate-800 rounded-md p-3">
             <div className="flex items-center justify-between mb-2">
@@ -181,7 +260,7 @@ export const OnlineAnalysisPanel: React.FC = () => {
             className="text-sm text-slate-400"
           />
         </div>
-        <p className="text-xs text-slate-500 mt-2">2) 在线数据导入：支持单个 CSV、多选 CSV 或整文件夹导入（文件夹下 CSV 将按 I_corr 读取）。</p>
+        <p className="text-xs text-slate-500 mt-2">2) 在线数据导入：支持单个 CSV、多选 CSV 或整文件夹导入。若列为 wavelength/intensity，将按所选范围转换为吸光度后再投影。</p>
         {varianceText && <p className="text-xs text-indigo-400 mt-2">{varianceText}</p>}
         {pcaResult && <p className="text-xs text-cyan-400 mt-1">当前 PCA 分析对象：{selectedTargetLabel}</p>}
         {error && <p className="text-sm text-red-400 mt-2">{error}</p>}
