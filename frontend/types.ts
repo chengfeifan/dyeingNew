@@ -102,5 +102,6 @@ export interface PcaModel {
 export interface PcaLibraryResult {
   points: PcaPoint[];
   explained_variance_ratio: number[];
+  analysis_target?: 'I_corr' | 'T' | 'A';
   model: PcaModel;
 }

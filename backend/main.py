@@ -398,6 +398,17 @@ async def analyze_concentration_methods(payload: ConcentrationAnalysisRequest):
 @app.post("/analysis/pca/library")
 async def analyze_pca_library(payload: PcaLibraryRequest):
     try:
+        target_map = {
+            "i_corr": "I_corr",
+            "transmittance": "T",
+            "absorbance": "A",
+            "I_corr": "I_corr",
+            "T": "T",
+            "A": "A",
+        }
+        target_key = target_map.get(payload.analysis_target, payload.analysis_target)
+        if target_key not in {"I_corr", "T", "A"}:
+            raise ValueError("analysis_target 仅支持 I_corr/transmittance/Absorbance")
         all_history = list_history()
         standard_items = [item for item in all_history if item.get("meta", {}).get("save_type") == "standard"]
         names = payload.standard_names or [item["name"] for item in standard_items]
@@ -410,14 +421,14 @@ async def analyze_pca_library(payload: PcaLibraryRequest):
             obj = load_json(name)
             data = obj.get("data", {})
             wavelength = np.asarray(data.get("lambda"), dtype=float)
-            absorbance = np.asarray(data.get("A"), dtype=float)
-            if wavelength.size == 0 or absorbance.size == 0:
+            spectrum = np.asarray(data.get(target_key), dtype=float)
+            if wavelength.size == 0 or spectrum.size == 0:
                 continue
             if wavelength_base is None:
                 wavelength_base = wavelength
-                spectra.append(absorbance)
+                spectra.append(spectrum)
             else:
-                spectra.append(interp_to(wavelength, absorbance, wavelength_base))
+                spectra.append(interp_to(wavelength, spectrum, wavelength_base))
             labels.append(obj.get("meta", {}).get("name") or name)
         if wavelength_base is None or len(spectra) < 2:
             raise ValueError("可用标准谱不足，至少需要 2 条")
@@ -431,6 +442,7 @@ async def analyze_pca_library(payload: PcaLibraryRequest):
         return {
             "points": points,
             "explained_variance_ratio": pca_result["explained_variance_ratio"].tolist(),
+            "analysis_target": target_key,
             "model": {
                 "wavelength_nm": wavelength_base.tolist(),
                 "mean": pca_result["mean"].tolist(),

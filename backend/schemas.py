@@ -111,6 +111,7 @@ class ConcentrationAnalysisResponse(BaseModel):
 class PcaLibraryRequest(BaseModel):
     standard_names: Optional[List[str]] = None
     n_components: int = 2
+    analysis_target: str = Field("A", description="PCA 分析对象：I_corr/T/A")
 
 class PcaModelPayload(BaseModel):
     wavelength_nm: List[float]

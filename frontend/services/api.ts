@@ -203,11 +203,15 @@ export const analyzeConcentrationMethods = async (
   }
 };
 
-export const analyzeStandardLibraryPca = async (standardNames: string[] = []): Promise<PcaLibraryResult> => {
+export const analyzeStandardLibraryPca = async (
+  standardNames: string[] = [],
+  analysisTarget: 'I_corr' | 'T' | 'A' = 'A'
+): Promise<PcaLibraryResult> => {
   try {
     const { data } = await api.post('/analysis/pca/library', {
       standard_names: standardNames,
       n_components: 2,
+      analysis_target: analysisTarget,
     });
     return data as PcaLibraryResult;
   } catch (error) {
