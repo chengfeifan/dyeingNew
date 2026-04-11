@@ -179,12 +179,16 @@ export const downloadHistoryZip = async (): Promise<Blob> => {
 
 export const analyzeConcentration = async (
   sampleFilename: string,
-  standardFilenames: string[]
+  standardFilenames: string[],
+  rangeMinNm: number = 400,
+  rangeMaxNm: number = 780
 ): Promise<ConcentrationResult> => {
   try {
     const { data } = await api.post('/analysis/concentration', {
       sample: sampleFilename,
       standards: standardFilenames,
+      range_min_nm: rangeMinNm,
+      range_max_nm: rangeMaxNm,
     });
     return data as ConcentrationResult;
   } catch (error) {
