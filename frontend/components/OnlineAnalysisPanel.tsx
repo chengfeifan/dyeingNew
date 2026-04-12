@@ -3,7 +3,8 @@ import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, Responsive
 import { analyzeStandardLibraryPca, fetchHistoryList, parseSpcReference, projectRealtimePcaPath } from '../services/api';
 import { HistoryItem, PcaLibraryResult } from '../types';
 
-type CsvParsed = { wavelength: number[]; series: Array<{ label: string; values: number[]; isIntensity: boolean }> };
+type CsvSeriesKind = 'I_corr' | 'T' | 'A' | 'unknown';
+type CsvParsed = { wavelength: number[]; series: Array<{ label: string; values: number[]; isIntensity: boolean; kind: CsvSeriesKind }> };
 type SpectrumSeries = { label: string; absorbance: number[]; timestampText: string; timestampValue: number };
 
 const splitColumns = (line: string): string[] => {
@@ -13,6 +14,14 @@ const splitColumns = (line: string): string[] => {
 };
 
 const normalizeHeader = (value: string): string => value.trim().toLowerCase();
+
+const detectSeriesKind = (label: string): CsvSeriesKind => {
+  const header = normalizeHeader(label);
+  if (['i_corr', 'intensity', 'signal', 'i'].includes(header)) return 'I_corr';
+  if (['t', 'transmittance', 'trans', 'tr'].includes(header)) return 'T';
+  if (['a', 'absorbance', 'abs'].includes(header)) return 'A';
+  return 'unknown';
+};
 
 const intensityToAbsorbance = (intensity: number[]): number[] => {
   const safeIntensity = intensity.map((value) => (Number.isFinite(value) ? Math.max(value, 1e-8) : 1e-8));
@@ -78,18 +87,18 @@ const parseCsv = async (file: File, rangeMin: number, rangeMax: number): Promise
   });
   const parsedSeries = labels.map((label, idx) => {
     const values = seriesValues[idx] || [];
-    const absorbance = hasSingleSeries && intensityIndex >= 0 ? intensityToAbsorbance(values) : values;
-    const ranged = applyRange(wavelength, absorbance, rangeMin, rangeMax);
+    const ranged = applyRange(wavelength, values, rangeMin, rangeMax);
     return {
       label,
       values: ranged.absorbance,
       isIntensity: hasSingleSeries && intensityIndex >= 0,
+      kind: hasSingleSeries ? (intensityIndex >= 0 ? 'I_corr' : 'A') : detectSeriesKind(label),
       wavelength: ranged.wavelength,
     };
   });
   return {
     wavelength: parsedSeries[0]?.wavelength || [],
-    series: parsedSeries.map((item) => ({ label: item.label, values: item.values, isIntensity: item.isIntensity })),
+    series: parsedSeries.map((item) => ({ label: item.label, values: item.values, isIntensity: item.isIntensity, kind: item.kind })),
   };
 };
 
@@ -135,6 +144,19 @@ const TARGET_OPTIONS: Array<{ value: 'I_corr' | 'T' | 'A'; label: string }> = [
 const formatPcaTick = (value: number | string): string => {
   const num = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(num) ? num.toFixed(1) : `${value}`;
+};
+
+const chooseTargetSeries = (
+  parsed: CsvParsed,
+  target: 'I_corr' | 'T' | 'A',
+): { label: string; values: number[]; isIntensity: boolean; kind: CsvSeriesKind } | null => {
+  const exact = parsed.series.find((item) => item.kind === target);
+  if (exact) return exact;
+  if (target === 'A') {
+    const fromIntensity = parsed.series.find((item) => item.kind === 'I_corr');
+    if (fromIntensity) return fromIntensity;
+  }
+  return parsed.series[0] || null;
 };
 
 export const OnlineAnalysisPanel: React.FC = () => {
@@ -199,14 +221,18 @@ export const OnlineAnalysisPanel: React.FC = () => {
         waterInterp = interpolateLinear(parsedWater.wavelength_nm, parsedWater.intensity, baseWavelength);
       }
       const mergedSeries: SpectrumSeries[] = parsedSeries.map((parsed, index) => {
-        const first = parsed.series[0];
-        if (!first) throw new Error(`CSV ${csvFiles[index].name} 缺少 I_corr 列`);
-        let absorbance = first.isIntensity ? intensityToAbsorbance(first.values) : first.values;
+        const selected = chooseTargetSeries(parsed, analysisTarget);
+        if (!selected) throw new Error(`CSV ${csvFiles[index].name} 缺少可用光谱列`);
+        let absorbance = selected.kind === 'T'
+          ? selected.values.map((value) => -Math.log10(Math.max(value, 1e-8)))
+          : selected.isIntensity
+            ? intensityToAbsorbance(selected.values)
+            : selected.values;
         if (darkInterp && waterInterp) {
-          if (!first.isIntensity) {
-            throw new Error(`CSV ${csvFiles[index].name} 不是强度数据，无法结合暗光谱/清水光谱重新计算吸光度`);
+          if (selected.kind !== 'I_corr') {
+            throw new Error(`CSV ${csvFiles[index].name} 不包含 I_corr 列，无法结合暗光谱/清水光谱重新计算吸光度`);
           }
-          absorbance = first.values.map((sampleIntensity, i) => {
+          absorbance = selected.values.map((sampleIntensity, i) => {
             const denominator = Math.max(waterInterp![i] - darkInterp![i], 1e-8);
             const transmittance = Math.max((sampleIntensity - darkInterp![i]) / denominator, 1e-8);
             return -Math.log10(transmittance);
@@ -214,7 +240,7 @@ export const OnlineAnalysisPanel: React.FC = () => {
         }
         const timeInfo = extractTimestamp(csvFiles[index].name);
         return {
-          label: csvFiles[index].name.replace(/\.csv$/i, '') || first.label,
+          label: csvFiles[index].name.replace(/\.csv$/i, '') || selected.label,
           absorbance,
           ...timeInfo,
         };
