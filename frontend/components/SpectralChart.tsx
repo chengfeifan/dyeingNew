@@ -22,9 +22,9 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
     if (!data || !data.data.lambda) return [];
     return data.data.lambda.map((lambda, i) => ({
       lambda,
-      I_corr: data.data.I_corr[i],
-      T: data.data.T[i],
-      A: data.data.A[i],
+      I_corr: Number.isFinite(data.data.I_corr[i]) ? data.data.I_corr[i] : null,
+      T: Number.isFinite(data.data.T[i]) ? data.data.T[i] : null,
+      A: Number.isFinite(data.data.A[i]) ? data.data.A[i] : null,
     })).sort((a, b) => a.lambda - b.lambda);
   }, [data]);
 
@@ -53,8 +53,8 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
 
     const values = chartData.flatMap((row) =>
       activeKeys
-        .map((key) => Number(row[key]))
-        .filter((value) => Number.isFinite(value))
+        .map((key) => row[key])
+        .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
     );
 
     if (!values.length) return [-0.1, 1.1];
@@ -185,13 +185,13 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
             <Legend verticalAlign="top" height={36} wrapperStyle={{ color: '#cbd5e1' }}/>
             
             {visibleLines.I_corr && (
-                <Line type="monotone" dataKey="I_corr" stroke="#3b82f6" dot={false} strokeWidth={2} name="I_corr (Sample - Dark)" isAnimationActive={false} />
+                <Line type="linear" dataKey="I_corr" stroke="#3b82f6" dot={false} strokeWidth={2} name="I_corr (Sample - Dark)" isAnimationActive={false} />
             )}
             {visibleLines.T && (
-                <Line type="monotone" dataKey="T" stroke="#10b981" dot={false} strokeWidth={2} name="Transmittance" isAnimationActive={false} />
+                <Line type="linear" dataKey="T" stroke="#10b981" dot={false} strokeWidth={2} name="Transmittance" isAnimationActive={false} />
             )}
             {visibleLines.A && (
-                <Line type="monotone" dataKey="A" stroke="#ef4444" dot={false} strokeWidth={2} name="Absorbance (-log10 T)" isAnimationActive={false} />
+                <Line type="linear" dataKey="A" stroke="#ef4444" dot={false} strokeWidth={2} name="Absorbance (-log10 T)" isAnimationActive={false} />
             )}
           </LineChart>
         </ResponsiveContainer>
