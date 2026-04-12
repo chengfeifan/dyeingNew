@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { ProcessedData } from '../types';
 import { ArrowDownTrayIcon } from '@heroicons/react/24/outline';
+import { WavelengthColorBand } from './WavelengthColorBand';
 
 interface Props {
   data: ProcessedData;
@@ -13,18 +14,20 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
     T: true,
     A: true
   });
-  const [rangeMin, setRangeMin] = useState<string>('');
-  const [rangeMax, setRangeMax] = useState<string>('');
+  const [rangeMin, setRangeMin] = useState<string>('380');
+  const [rangeMax, setRangeMax] = useState<string>('780');
 
   // Transform data for Recharts (array of objects)
   const rawChartData = useMemo(() => {
     if (!data || !data.data.lambda) return [];
-    return data.data.lambda.map((lambda, i) => ({
-      lambda,
-      I_corr: data.data.I_corr[i],
-      T: data.data.T[i],
-      A: data.data.A[i],
-    }));
+    return data.data.lambda
+      .map((lambda, i) => ({
+        lambda,
+        I_corr: data.data.I_corr[i],
+        T: data.data.T[i],
+        A: data.data.A[i],
+      }))
+      .sort((a, b) => a.lambda - b.lambda);
   }, [data]);
 
   const chartData = useMemo(() => {
@@ -86,7 +89,7 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
             <input
               value={rangeMin}
               onChange={(e) => setRangeMin(e.target.value)}
-              placeholder="例如 350"
+              placeholder="例如 380"
               className="w-24 bg-slate-800 border-slate-700 rounded-md text-xs text-slate-200"
             />
           </div>
@@ -95,14 +98,14 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
             <input
               value={rangeMax}
               onChange={(e) => setRangeMax(e.target.value)}
-              placeholder="例如 800"
+              placeholder="例如 780"
               className="w-24 bg-slate-800 border-slate-700 rounded-md text-xs text-slate-200"
             />
           </div>
           <button
             onClick={() => {
-              setRangeMin('');
-              setRangeMax('');
+              setRangeMin('380');
+              setRangeMax('780');
             }}
             className="px-3 py-2 text-xs bg-slate-800 text-slate-300 rounded-md hover:bg-slate-700 border border-slate-700"
           >
@@ -124,14 +127,18 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
             <XAxis 
                 dataKey="lambda" 
+                type="number"
+                domain={['dataMin', 'dataMax']}
                 label={{ value: 'Wavelength / Wavenumber', position: 'insideBottom', offset: -10, fill: '#64748b' }} 
                 tick={{ fontSize: 12, fill: '#94a3b8' }}
                 stroke="#475569"
+                tickFormatter={(value: number) => Number(value).toFixed(1)}
             />
             <YAxis tick={{ fontSize: 12, fill: '#94a3b8' }} stroke="#475569" />
             <Tooltip 
                 contentStyle={{ backgroundColor: '#0f172a', borderRadius: '6px', border: '1px solid #334155', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)', color: '#f1f5f9' }}
                 itemStyle={{ color: '#e2e8f0' }}
+                labelFormatter={(value: number) => `${Number(value).toFixed(1)} nm`}
             />
             <Legend verticalAlign="top" height={36} wrapperStyle={{ color: '#cbd5e1' }}/>
             
@@ -146,6 +153,7 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
             )}
           </LineChart>
         </ResponsiveContainer>
+        <WavelengthColorBand />
       </div>
     </div>
   );
