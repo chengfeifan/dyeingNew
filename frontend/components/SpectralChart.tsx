@@ -106,7 +106,7 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
   };
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="w-full flex flex-col">
       <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
         <div>
             <h3 className="text-xl font-bold text-slate-100">{data.meta.name || "Analysis Result"}</h3>
@@ -163,11 +163,12 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
         </div>
       </div>
 
-      <div className="flex-1 min-h-[400px]">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 20, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-            <XAxis 
+      <div className="flex-1 min-h-0 flex flex-col">
+        <div className="w-full h-[420px] min-h-0">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 20, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+              <XAxis 
                 dataKey="lambda" 
                 type="number"
                 domain={['dataMin', 'dataMax']}
@@ -175,27 +176,31 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
                 tick={{ fontSize: 12, fill: '#94a3b8' }}
                 stroke="#475569"
                 tickFormatter={(value: number) => Number(value).toFixed(1)}
-            />
-            <YAxis domain={yDomain} tick={{ fontSize: 12, fill: '#94a3b8' }} stroke="#475569" />
-            <Tooltip 
+              />
+              <YAxis domain={yDomain} tick={{ fontSize: 12, fill: '#94a3b8' }} stroke="#475569" />
+              <Tooltip 
                 contentStyle={{ backgroundColor: '#0f172a', borderRadius: '6px', border: '1px solid #334155', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)', color: '#f1f5f9' }}
                 itemStyle={{ color: '#e2e8f0' }}
                 labelFormatter={(value: number) => `${Number(value).toFixed(1)} nm`}
-            />
-            <Legend verticalAlign="top" height={36} wrapperStyle={{ color: '#cbd5e1' }}/>
-            
-            {visibleLines.I_corr && (
+              />
+              <Legend verticalAlign="top" height={36} wrapperStyle={{ color: '#cbd5e1' }}/>
+      
+              {visibleLines.I_corr && (
                 <Line type="linear" dataKey="I_corr" stroke="#3b82f6" dot={false} strokeWidth={2} name="I_corr (Sample - Dark)" isAnimationActive={false} />
-            )}
-            {visibleLines.T && (
+              )}
+              {visibleLines.T && (
                 <Line type="linear" dataKey="T" stroke="#10b981" dot={false} strokeWidth={2} name="Transmittance" isAnimationActive={false} />
-            )}
-            {visibleLines.A && (
+              )}
+              {visibleLines.A && (
                 <Line type="linear" dataKey="A" stroke="#ef4444" dot={false} strokeWidth={2} name="Absorbance (-log10 T)" isAnimationActive={false} />
-            )}
-          </LineChart>
-        </ResponsiveContainer>
-        <WavelengthColorBand />
+              )}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      
+        <div className="mt-2 shrink-0">
+          <WavelengthColorBand />
+        </div>
       </div>
     </div>
   );
