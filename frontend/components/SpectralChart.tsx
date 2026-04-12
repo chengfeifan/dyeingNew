@@ -186,7 +186,7 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
       <div className="flex-1 min-h-0 flex flex-col">
         <div className="flex-1 min-h-[400px]">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 20, left: 0 }}>
+            <LineChart data={chartData} margin={{ top: 5, right: 24, bottom: 20, left: 16 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis 
                 dataKey="lambda" 
@@ -200,6 +200,8 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
               />
               <YAxis
                 domain={yDomain}
+                width={72}
+                tickMargin={8}
                 tick={{ fontSize: 12, fill: '#94a3b8' }}
                 stroke="#475569"
                 tickFormatter={formatSignificant2}
