@@ -3,6 +3,7 @@ import { HistoryItem, ConcentrationResult, ConcentrationMethodResult, ProcessedD
 import { fetchHistoryList, analyzeConcentration, analyzeConcentrationMethods, fetchHistoryItem, updateHistoryItem, deleteHistoryItem, reprocessHistorySpectrum } from '../services/api';
 import { BeakerIcon, PlayIcon, BookOpenIcon, TrashIcon, CheckIcon, XMarkIcon, PencilSquareIcon, DocumentTextIcon, TableCellsIcon, ArchiveBoxIcon, EyeIcon } from '@heroicons/react/24/outline';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
+import { WavelengthColorBand } from './WavelengthColorBand';
 
 type Tab = 'analysis' | 'standard-library' | 'sample-library';
 type AnalysisMethod = 'nnls' | 'lambda_equations' | 'peak_area' | 'ratio_derivative_2c' | 'zero_cross_ratio_derivative_3c';
@@ -54,8 +55,11 @@ export const ConcentrationPanel: React.FC = () => {
     });
     const [viewingItemName, setViewingItemName] = useState<string | null>(null);
     const [viewingItemData, setViewingItemData] = useState<ProcessedData | null>(null);
-    const [viewRangeMin, setViewRangeMin] = useState<string>('');
-    const [viewRangeMax, setViewRangeMax] = useState<string>('');
+    const [viewRangeMin, setViewRangeMin] = useState<string>('380');
+    const [viewRangeMax, setViewRangeMax] = useState<string>('780');
+    const [viewSeriesKey, setViewSeriesKey] = useState<'I_corr' | 'T' | 'A'>('A');
+    const [librarySearch, setLibrarySearch] = useState<string>('');
+    const [libraryConcentrationFilter, setLibraryConcentrationFilter] = useState<'all' | 'with' | 'without'>('all');
 
     useEffect(() => {
         loadHistory();
@@ -81,6 +85,26 @@ export const ConcentrationPanel: React.FC = () => {
             return [name, std.filename, dyeCode].some(value => value.toLowerCase().includes(keyword));
         });
     }, [standards, standardSearch]);
+    const filteredLibraryItems = useMemo(() => {
+        const source = activeTab === 'standard-library' ? standards : samples;
+        const keyword = librarySearch.trim().toLowerCase();
+        return source.filter((item) => {
+            const matchesKeyword = !keyword || [
+                item.name || '',
+                item.filename || '',
+                item.meta?.concentration || '',
+                item.meta?.dye_code || '',
+                item.timestamp || ''
+            ].some((value) => value.toLowerCase().includes(keyword));
+            const concentration = (item.meta?.concentration || '').trim();
+            const matchesConcentration = libraryConcentrationFilter === 'all'
+                ? true
+                : libraryConcentrationFilter === 'with'
+                    ? concentration.length > 0
+                    : concentration.length === 0;
+            return matchesKeyword && matchesConcentration;
+        });
+    }, [activeTab, libraryConcentrationFilter, librarySearch, samples, standards]);
 
     const parseNumberList = (input: string): number[] => {
         return input
@@ -373,8 +397,9 @@ export const ConcentrationPanel: React.FC = () => {
     const handleView = async (filename: string) => {
         setViewingItemName(filename);
         setViewingItemData(null);
-        setViewRangeMin('');
-        setViewRangeMax('');
+        setViewRangeMin('380');
+        setViewRangeMax('780');
+        setViewSeriesKey('A');
         try {
             const detail = await fetchHistoryItem(filename);
             setViewingItemData(detail);
@@ -886,6 +911,30 @@ export const ConcentrationPanel: React.FC = () => {
                     </div>
 
                     <div className="overflow-auto flex-1 custom-scrollbar">
+                        <div className="mb-4 flex flex-wrap items-end gap-3">
+                            <div>
+                                <label className="text-xs text-slate-500 block mb-1">搜索</label>
+                                <input
+                                    type="text"
+                                    value={librarySearch}
+                                    onChange={(e) => setLibrarySearch(e.target.value)}
+                                    placeholder="按名称/文件名/时间筛选"
+                                    className="w-64 bg-slate-800 border-slate-700 rounded-md text-sm text-slate-200"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-slate-500 block mb-1">浓度筛选</label>
+                                <select
+                                    value={libraryConcentrationFilter}
+                                    onChange={(e) => setLibraryConcentrationFilter(e.target.value as 'all' | 'with' | 'without')}
+                                    className="bg-slate-800 border-slate-700 rounded-md text-sm text-slate-200"
+                                >
+                                    <option value="all">全部</option>
+                                    <option value="with">仅有标定浓度</option>
+                                    <option value="without">仅无标定浓度</option>
+                                </select>
+                            </div>
+                        </div>
                         <table className="min-w-full divide-y divide-slate-800">
                             <thead className="bg-slate-950 sticky top-0 z-10">
                                 <tr>
@@ -897,7 +946,7 @@ export const ConcentrationPanel: React.FC = () => {
                                 </tr>
                             </thead>
                             <tbody className="bg-slate-900 divide-y divide-slate-800">
-                                {(activeTab === 'standard-library' ? standards : samples).map((item) => (
+                                {filteredLibraryItems.map((item) => (
                                     <tr key={item.filename} className="hover:bg-slate-800 transition-colors">
                                         {editingItem === item.filename ? (
                                             <>
@@ -1024,7 +1073,12 @@ export const ConcentrationPanel: React.FC = () => {
                                     </tr>
                                 ))}
                             </tbody>
-                        </table>
+                                </table>
+                                {filteredLibraryItems.length === 0 && (
+                                    <div className="text-center text-sm text-slate-500 py-8">
+                                        当前筛选条件下没有匹配记录。
+                                    </div>
+                                )}
                     </div>
                 </div>
             )}
@@ -1071,27 +1125,65 @@ export const ConcentrationPanel: React.FC = () => {
                                     </div>
                                     <button
                                         onClick={() => {
-                                            setViewRangeMin('');
-                                            setViewRangeMax('');
+                                            setViewRangeMin('380');
+                                            setViewRangeMax('780');
                                         }}
                                         className="px-3 py-2 text-xs text-slate-300 bg-slate-800 border border-slate-700 rounded-md"
                                     >
                                         重置范围
                                     </button>
                                 </div>
+                                <div className="flex items-center gap-4 text-xs text-slate-300">
+                                    <label className="flex items-center gap-1 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="viewSeries"
+                                            checked={viewSeriesKey === 'I_corr'}
+                                            onChange={() => setViewSeriesKey('I_corr')}
+                                        />
+                                        <span className="text-blue-400">I_corr</span>
+                                    </label>
+                                    <label className="flex items-center gap-1 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="viewSeries"
+                                            checked={viewSeriesKey === 'T'}
+                                            onChange={() => setViewSeriesKey('T')}
+                                        />
+                                        <span className="text-emerald-400">Transmittance (T)</span>
+                                    </label>
+                                    <label className="flex items-center gap-1 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="viewSeries"
+                                            checked={viewSeriesKey === 'A'}
+                                            onChange={() => setViewSeriesKey('A')}
+                                        />
+                                        <span className="text-red-400">Absorbance (A)</span>
+                                    </label>
+                                </div>
                                 <div className="flex-1 min-h-[300px]">
                                     <ResponsiveContainer width="100%" height="100%">
                                         <LineChart data={viewedChartData}>
                                             <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                                            <XAxis dataKey="lambda" stroke="#475569" tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                                            <XAxis
+                                                dataKey="lambda"
+                                                stroke="#475569"
+                                                tick={{ fontSize: 11, fill: '#94a3b8' }}
+                                                tickFormatter={(value: number) => Number(value).toFixed(1)}
+                                            />
                                             <YAxis stroke="#475569" tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                                            <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155' }} />
+                                            <Tooltip
+                                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155' }}
+                                                labelFormatter={(value: number) => `${Number(value).toFixed(1)} nm`}
+                                            />
                                             <Legend />
-                                            <Line type="monotone" dataKey="A" stroke="#ef4444" dot={false} name="Absorbance" />
-                                            <Line type="monotone" dataKey="T" stroke="#10b981" dot={false} name="Transmittance" />
-                                            <Line type="monotone" dataKey="I_corr" stroke="#3b82f6" dot={false} name="I_corr" />
+                                            {viewSeriesKey === 'A' && <Line type="monotone" dataKey="A" stroke="#ef4444" dot={false} name="Absorbance" />}
+                                            {viewSeriesKey === 'T' && <Line type="monotone" dataKey="T" stroke="#10b981" dot={false} name="Transmittance" />}
+                                            {viewSeriesKey === 'I_corr' && <Line type="monotone" dataKey="I_corr" stroke="#3b82f6" dot={false} name="I_corr" />}
                                         </LineChart>
                                     </ResponsiveContainer>
+                                    <WavelengthColorBand />
                                 </div>
                             </div>
                         )}
