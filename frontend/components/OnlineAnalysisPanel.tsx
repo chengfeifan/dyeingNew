@@ -93,6 +93,11 @@ const TARGET_OPTIONS: Array<{ value: 'I_corr' | 'T' | 'A'; label: string }> = [
   { value: 'A', label: 'Absorbance' },
 ];
 
+const formatPcaTick = (value: number | string): string => {
+  const num = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(num) ? num.toFixed(1) : `${value}`;
+};
+
 export const OnlineAnalysisPanel: React.FC = () => {
   const [pcaResult, setPcaResult] = useState<PcaLibraryResult | null>(null);
   const [pathData, setPathData] = useState<Array<{ label: string; pc1: number; pc2: number }>>([]);
@@ -272,8 +277,8 @@ export const OnlineAnalysisPanel: React.FC = () => {
           <ResponsiveContainer width="100%" height="100%">
             <ScatterChart margin={{ top: 20, right: 20, bottom: 30, left: 10 }}>
               <CartesianGrid stroke="#334155" />
-              <XAxis dataKey="pc1" stroke="#94a3b8" name="PC1" />
-              <YAxis dataKey="pc2" stroke="#94a3b8" name="PC2" />
+              <XAxis dataKey="pc1" stroke="#94a3b8" name="PC1" tickFormatter={formatPcaTick} />
+              <YAxis dataKey="pc2" stroke="#94a3b8" name="PC2" tickFormatter={formatPcaTick} />
               <Tooltip cursor={{ strokeDasharray: '3 3' }} />
               <Scatter data={pcaResult?.points || []} fill="#6366f1" />
             </ScatterChart>
@@ -284,8 +289,8 @@ export const OnlineAnalysisPanel: React.FC = () => {
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={pathData} margin={{ top: 20, right: 20, bottom: 30, left: 10 }}>
               <CartesianGrid stroke="#334155" />
-              <XAxis dataKey="pc1" type="number" stroke="#94a3b8" />
-              <YAxis dataKey="pc2" type="number" stroke="#94a3b8" />
+              <XAxis dataKey="pc1" type="number" stroke="#94a3b8" tickFormatter={formatPcaTick} />
+              <YAxis dataKey="pc2" type="number" stroke="#94a3b8" tickFormatter={formatPcaTick} />
               <Tooltip />
               <Legend />
               <Line type="monotone" dataKey="pc2" stroke="#22d3ee" dot={{ r: 3 }} name="Path on PC plane" />
