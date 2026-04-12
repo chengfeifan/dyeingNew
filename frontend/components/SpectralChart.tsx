@@ -106,7 +106,7 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
   };
 
   return (
-    <div className="h-full flex flex-col w-full">
+    <div className="h-full flex flex-col">
       <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
         <div>
             <h3 className="text-xl font-bold text-slate-100">{data.meta.name || "Analysis Result"}</h3>
@@ -163,7 +163,7 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
         </div>
       </div>
 
-      <div className="flex-1 min-h-[400px]">
+      <div className="h-[500px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 20, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
