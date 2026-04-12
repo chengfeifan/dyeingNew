@@ -86,6 +86,26 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
     return [min, max];
   }, [chartData, visibleLines]);
 
+  const xDomain = useMemo<[number, number]>(() => {
+    if (chartData.length) {
+      return [chartData[0].lambda, chartData[chartData.length - 1].lambda];
+    }
+
+    const min = Number(rangeMin);
+    const max = Number(rangeMax);
+    if (Number.isFinite(min) && Number.isFinite(max) && min < max) {
+      return [min, max];
+    }
+
+    return [380, 780];
+  }, [chartData, rangeMin, rangeMax]);
+
+  const formatSignificant2 = (value: number) => {
+    if (!Number.isFinite(value)) return '';
+    if (value === 0) return '0';
+    return Number(value).toPrecision(2);
+  };
+
   const toggleLine = (key: keyof typeof visibleLines) => {
     setVisibleLines(prev => ({ ...prev, [key]: !prev[key] }));
   };
@@ -166,22 +186,31 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
       <div className="flex-1 min-h-0 flex flex-col">
         <div className="w-full h-[420px] min-h-0">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 20, left: 0 }}>
+            <LineChart data={chartData} margin={{ top: 5, right: 24, bottom: 20, left: 16 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis 
                 dataKey="lambda" 
                 type="number"
-                domain={['dataMin', 'dataMax']}
+                domain={xDomain}
+                allowDataOverflow
                 label={{ value: 'Wavelength / Wavenumber', position: 'insideBottom', offset: -10, fill: '#64748b' }} 
                 tick={{ fontSize: 12, fill: '#94a3b8' }}
                 stroke="#475569"
                 tickFormatter={(value: number) => Number(value).toFixed(1)}
               />
-              <YAxis domain={yDomain} tick={{ fontSize: 12, fill: '#94a3b8' }} stroke="#475569" />
+              <YAxis
+                domain={yDomain}
+                width={72}
+                tickMargin={8}
+                tick={{ fontSize: 12, fill: '#94a3b8' }}
+                stroke="#475569"
+                tickFormatter={formatSignificant2}
+              />
               <Tooltip 
                 contentStyle={{ backgroundColor: '#0f172a', borderRadius: '6px', border: '1px solid #334155', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)', color: '#f1f5f9' }}
                 itemStyle={{ color: '#e2e8f0' }}
                 labelFormatter={(value: number) => `${Number(value).toFixed(1)} nm`}
+                formatter={(value: number) => formatSignificant2(value)}
               />
               <Legend verticalAlign="top" height={36} wrapperStyle={{ color: '#cbd5e1' }}/>
       
