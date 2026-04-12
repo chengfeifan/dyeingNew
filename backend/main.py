@@ -516,6 +516,24 @@ async def project_realtime_pca(payload: PcaRealtimeProjectRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@app.post("/analysis/spc/reference")
+async def parse_reference_spc(file: UploadFile = File(...)):
+    try:
+        tmp_dir = Path("./_tmp"); tmp_dir.mkdir(exist_ok=True)
+        file_path = tmp_dir / file.filename
+        with open(file_path, "wb") as f:
+            f.write(await file.read())
+        wavelength, intensity = read_spc_first_xy(file_path)
+        if wavelength.size == 0 or intensity.size == 0:
+            raise ValueError("SPC 文件为空")
+        return {
+            "wavelength_nm": wavelength.tolist(),
+            "intensity": intensity.tolist(),
+            "filename": file.filename
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @app.post("/auth/login", response_model=UserPublic)
 async def login(payload: UserLogin):
     try:

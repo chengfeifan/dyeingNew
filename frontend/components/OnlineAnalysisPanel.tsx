@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend } from 'recharts';
-import { analyzeStandardLibraryPca, fetchHistoryList, projectRealtimePcaPath } from '../services/api';
+import { analyzeStandardLibraryPca, fetchHistoryList, parseSpcReference, projectRealtimePcaPath } from '../services/api';
 import { HistoryItem, PcaLibraryResult } from '../types';
 
-type CsvParsed = { wavelength: number[]; series: Array<{ label: string; absorbance: number[] }> };
+type CsvParsed = { wavelength: number[]; series: Array<{ label: string; values: number[]; isIntensity: boolean }> };
+type SpectrumSeries = { label: string; absorbance: number[]; timestampText: string; timestampValue: number };
 
 const splitColumns = (line: string): string[] => {
   if (line.includes('\t')) return line.split('\t').map((item) => item.trim());
@@ -79,12 +80,50 @@ const parseCsv = async (file: File, rangeMin: number, rangeMax: number): Promise
     const values = seriesValues[idx] || [];
     const absorbance = hasSingleSeries && intensityIndex >= 0 ? intensityToAbsorbance(values) : values;
     const ranged = applyRange(wavelength, absorbance, rangeMin, rangeMax);
-    return { label, absorbance: ranged.absorbance, wavelength: ranged.wavelength };
+    return {
+      label,
+      values: ranged.absorbance,
+      isIntensity: hasSingleSeries && intensityIndex >= 0,
+      wavelength: ranged.wavelength,
+    };
   });
   return {
     wavelength: parsedSeries[0]?.wavelength || [],
-    series: parsedSeries.map((item) => ({ label: item.label, absorbance: item.absorbance })),
+    series: parsedSeries.map((item) => ({ label: item.label, values: item.values, isIntensity: item.isIntensity })),
   };
+};
+
+const interpolateLinear = (xSource: number[], ySource: number[], xTarget: number[]): number[] => {
+  if (!xSource.length || xSource.length !== ySource.length) return xTarget.map(() => 0);
+  return xTarget.map((x) => {
+    if (x <= xSource[0]) return ySource[0];
+    if (x >= xSource[xSource.length - 1]) return ySource[ySource.length - 1];
+    let right = 1;
+    while (right < xSource.length && xSource[right] < x) right += 1;
+    const left = Math.max(0, right - 1);
+    const x0 = xSource[left];
+    const x1 = xSource[right];
+    const y0 = ySource[left];
+    const y1 = ySource[right];
+    if (x1 === x0) return y0;
+    const ratio = (x - x0) / (x1 - x0);
+    return y0 + ratio * (y1 - y0);
+  });
+};
+
+const extractTimestamp = (filename: string): { timestampText: string; timestampValue: number } => {
+  const matched = filename.match(/(\d{4})-(\d{2})-(\d{2})-[^-]*-(\d{2})(\d{2})(\d{2})/);
+  if (matched) {
+    const [, year, month, day, hh, mm, ss] = matched;
+    const date = new Date(`${year}-${month}-${day}T${hh}:${mm}:${ss}`);
+    if (!Number.isNaN(date.getTime())) {
+      return {
+        timestampText: `${year}/${month}/${day} ${hh}:${mm}:${ss}`,
+        timestampValue: date.getTime(),
+      };
+    }
+  }
+  return { timestampText: filename, timestampValue: Number.MAX_SAFE_INTEGER };
 };
 
 const TARGET_OPTIONS: Array<{ value: 'I_corr' | 'T' | 'A'; label: string }> = [
@@ -99,13 +138,17 @@ const formatPcaTick = (value: number | string): string => {
 };
 
 export const OnlineAnalysisPanel: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'library' | 'online'>('library');
   const [pcaResult, setPcaResult] = useState<PcaLibraryResult | null>(null);
-  const [pathData, setPathData] = useState<Array<{ label: string; pc1: number; pc2: number }>>([]);
+  const [pathData, setPathData] = useState<Array<{ label: string; pc1: number; pc2: number; timestampText: string; timestampValue: number }>>([]);
   const [standardItems, setStandardItems] = useState<HistoryItem[]>([]);
   const [selectedStandards, setSelectedStandards] = useState<string[]>([]);
   const [analysisTarget, setAnalysisTarget] = useState<'I_corr' | 'T' | 'A'>('A');
   const [rangeMinNm, setRangeMinNm] = useState<number>(188);
   const [rangeMaxNm, setRangeMaxNm] = useState<number>(800);
+  const [darkSpc, setDarkSpc] = useState<File | null>(null);
+  const [waterSpc, setWaterSpc] = useState<File | null>(null);
+  const [savedSnapshots, setSavedSnapshots] = useState<Array<Record<string, any>>>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -147,16 +190,40 @@ export const OnlineAnalysisPanel: React.FC = () => {
       const parsedSeries = await Promise.all(csvFiles.map((file) => parseCsv(file, rangeMinNm, rangeMaxNm)));
       const baseWavelength = parsedSeries[0].wavelength;
       if (!baseWavelength?.length) throw new Error('CSV 缺少有效波长数据');
-      const mergedSeries = parsedSeries.map((parsed, index) => {
+      let darkInterp: number[] | null = null;
+      let waterInterp: number[] | null = null;
+      if (darkSpc && waterSpc) {
+        const parsedDark = await parseSpcReference(darkSpc);
+        const parsedWater = await parseSpcReference(waterSpc);
+        darkInterp = interpolateLinear(parsedDark.wavelength_nm, parsedDark.intensity, baseWavelength);
+        waterInterp = interpolateLinear(parsedWater.wavelength_nm, parsedWater.intensity, baseWavelength);
+      }
+      const mergedSeries: SpectrumSeries[] = parsedSeries.map((parsed, index) => {
         const first = parsed.series[0];
         if (!first) throw new Error(`CSV ${csvFiles[index].name} 缺少 I_corr 列`);
+        let absorbance = first.isIntensity ? intensityToAbsorbance(first.values) : first.values;
+        if (darkInterp && waterInterp) {
+          if (!first.isIntensity) {
+            throw new Error(`CSV ${csvFiles[index].name} 不是强度数据，无法结合暗光谱/清水光谱重新计算吸光度`);
+          }
+          absorbance = first.values.map((sampleIntensity, i) => {
+            const denominator = Math.max(waterInterp![i] - darkInterp![i], 1e-8);
+            const transmittance = Math.max((sampleIntensity - darkInterp![i]) / denominator, 1e-8);
+            return -Math.log10(transmittance);
+          });
+        }
+        const timeInfo = extractTimestamp(csvFiles[index].name);
         return {
           label: csvFiles[index].name.replace(/\.csv$/i, '') || first.label,
-          absorbance: first.absorbance,
+          absorbance,
+          ...timeInfo,
         };
       });
       const path = await projectRealtimePcaPath(baseWavelength, mergedSeries, pcaResult.model);
-      setPathData(path);
+      const mergedPath = path
+        .map((point, idx) => ({ ...point, ...mergedSeries[idx] }))
+        .sort((a, b) => a.timestampValue - b.timestampValue);
+      setPathData(mergedPath);
     } catch (err: any) {
       setError(err?.message || '实时光谱解析失败');
     } finally {
@@ -184,11 +251,42 @@ export const OnlineAnalysisPanel: React.FC = () => {
   const selectAllStandards = () => setSelectedStandards(standardItems.map((item) => item.filename));
   const clearAllStandards = () => setSelectedStandards([]);
 
+  const saveSnapshotAsJson = () => {
+    if (!pathData.length || !pcaResult?.model?.wavelength_nm?.length) {
+      setError('暂无可保存的在线吸光度结果');
+      return;
+    }
+    const snapshot = {
+      saved_at: new Date().toISOString(),
+      pca_target: analysisTarget,
+      wavelength_nm: pcaResult.model.wavelength_nm,
+      records: pathData.map((item) => ({
+        label: item.label,
+        timestamp: item.timestampText,
+        pc1: item.pc1,
+        pc2: item.pc2,
+      })),
+    };
+    const next = [...savedSnapshots, snapshot];
+    setSavedSnapshots(next);
+    const blob = new Blob([JSON.stringify(next, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `online_pca_absorbance_${Date.now()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="max-w-7xl mx-auto h-full flex flex-col gap-6 text-slate-300">
       <div className="bg-slate-900 border border-slate-800 rounded-lg p-5">
         <h2 className="text-lg font-semibold text-slate-100 mb-2">在线数据侧栏分析（PCA）</h2>
-        <p className="text-sm text-slate-500 mb-4">先选择标准库和分析对象执行 PCA，再导入在线 I_corr CSV（支持文件夹）生成 PC1-PC2 路径图。</p>
+        <p className="text-sm text-slate-500 mb-4">先进行标准库 PCA，再切换到在线数据上传。支持暗光谱/清水光谱（SPC）参与吸光度计算，并按时间轴查看 PC1、PC2 轨迹。</p>
+        <div className="flex gap-2 mb-4">
+          <button onClick={() => setActiveTab('library')} className={`px-3 py-1 rounded text-sm ${activeTab === 'library' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300'}`}>标准库 PCA</button>
+          <button onClick={() => setActiveTab('online')} className={`px-3 py-1 rounded text-sm ${activeTab === 'online' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-300'}`}>在线数据上传</button>
+        </div>
 
         <div className="space-y-3 mb-4">
           <div className="flex flex-wrap items-center gap-3">
@@ -246,26 +344,41 @@ export const OnlineAnalysisPanel: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-3 flex-wrap">
-          <button
-            onClick={runLibraryPca}
-            disabled={loading || selectedStandards.length < 2}
-            className="px-4 py-2 bg-indigo-600 rounded-md text-white text-sm font-medium disabled:bg-slate-700"
-          >
-            1) 标准库 PCA 分析
-          </button>
-          <input
-            type="file"
-            accept=".csv"
-            multiple
-            // @ts-ignore: 浏览器目录导入属性
-            webkitdirectory="true"
-            onChange={handleUploadRealtime}
-            disabled={!pcaResult || loading}
-            className="text-sm text-slate-400"
-          />
-        </div>
-        <p className="text-xs text-slate-500 mt-2">2) 在线数据导入：支持单个 CSV、多选 CSV 或整文件夹导入。若列为 wavelength/intensity，将按所选范围转换为吸光度后再投影。</p>
+        {activeTab === 'library' && (
+          <div className="flex items-center gap-3 flex-wrap">
+            <button
+              onClick={runLibraryPca}
+              disabled={loading || selectedStandards.length < 2}
+              className="px-4 py-2 bg-indigo-600 rounded-md text-white text-sm font-medium disabled:bg-slate-700"
+            >
+              标准库 PCA 分析
+            </button>
+          </div>
+        )}
+        {activeTab === 'online' && (
+          <div className="space-y-3">
+            <div className="flex gap-3 items-center flex-wrap">
+              <label className="text-sm text-slate-400">暗光谱(SPC)</label>
+              <input type="file" accept=".spc,.txt,.csv" onChange={(e) => setDarkSpc(e.target.files?.[0] || null)} className="text-sm text-slate-400" />
+              <label className="text-sm text-slate-400">清水光谱(SPC)</label>
+              <input type="file" accept=".spc,.txt,.csv" onChange={(e) => setWaterSpc(e.target.files?.[0] || null)} className="text-sm text-slate-400" />
+            </div>
+            <div className="flex gap-3 items-center flex-wrap">
+              <input
+                type="file"
+                accept=".csv"
+                multiple
+                // @ts-ignore: 浏览器目录导入属性
+                webkitdirectory="true"
+                onChange={handleUploadRealtime}
+                disabled={!pcaResult || loading}
+                className="text-sm text-slate-400"
+              />
+              <button onClick={saveSnapshotAsJson} disabled={!pathData.length} className="px-3 py-1 bg-cyan-700 rounded text-sm disabled:bg-slate-700">保存在线结果(JSON)</button>
+            </div>
+          </div>
+        )}
+        <p className="text-xs text-slate-500 mt-2">在线导入支持从文件名提取时间（如 2026-04-09-SPEC-023002.csv → 2026/04/09 02:30:02），并按时间排序绘制 PC1、PC2。</p>
         {varianceText && <p className="text-xs text-indigo-400 mt-2">{varianceText}</p>}
         {pcaResult && <p className="text-xs text-cyan-400 mt-1">当前 PCA 分析对象：{selectedTargetLabel}</p>}
         {error && <p className="text-sm text-red-400 mt-2">{error}</p>}
@@ -277,7 +390,7 @@ export const OnlineAnalysisPanel: React.FC = () => {
           <ResponsiveContainer width="100%" height="100%">
             <ScatterChart margin={{ top: 20, right: 20, bottom: 30, left: 10 }}>
               <CartesianGrid stroke="#334155" />
-              <XAxis dataKey="pc1" stroke="#94a3b8" name="PC1" tickFormatter={formatPcaTick} />
+              <XAxis type="number" dataKey="pc1" stroke="#94a3b8" name="PC1" label={{ value: 'PC1', position: 'insideBottom', offset: -10 }} tickFormatter={formatPcaTick} />
               <YAxis dataKey="pc2" stroke="#94a3b8" name="PC2" tickFormatter={formatPcaTick} />
               <Tooltip cursor={{ strokeDasharray: '3 3' }} />
               <Scatter data={pcaResult?.points || []} fill="#6366f1" />
@@ -285,15 +398,16 @@ export const OnlineAnalysisPanel: React.FC = () => {
           </ResponsiveContainer>
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-lg p-4 h-[420px]">
-          <h3 className="text-sm font-semibold text-slate-300 mb-2">实时光谱投影路径（PC1-PC2）</h3>
+          <h3 className="text-sm font-semibold text-slate-300 mb-2">实时光谱投影（PC1/PC2 vs 时间）</h3>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={pathData} margin={{ top: 20, right: 20, bottom: 30, left: 10 }}>
               <CartesianGrid stroke="#334155" />
-              <XAxis dataKey="pc1" type="number" stroke="#94a3b8" tickFormatter={formatPcaTick} />
-              <YAxis dataKey="pc2" type="number" stroke="#94a3b8" tickFormatter={formatPcaTick} />
+              <XAxis dataKey="timestampText" stroke="#94a3b8" angle={-20} textAnchor="end" height={60} />
+              <YAxis stroke="#94a3b8" tickFormatter={formatPcaTick} />
               <Tooltip />
               <Legend />
-              <Line type="monotone" dataKey="pc2" stroke="#22d3ee" dot={{ r: 3 }} name="Path on PC plane" />
+              <Line type="monotone" dataKey="pc1" stroke="#f59e0b" dot={{ r: 3 }} name="PC1" />
+              <Line type="monotone" dataKey="pc2" stroke="#22d3ee" dot={{ r: 3 }} name="PC2" />
             </LineChart>
           </ResponsiveContainer>
         </div>

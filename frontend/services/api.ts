@@ -240,6 +240,21 @@ export const projectRealtimePcaPath = async (
   }
 };
 
+export const parseSpcReference = async (
+  file: File
+): Promise<{ wavelength_nm: number[]; intensity: number[]; filename: string }> => {
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    const { data } = await api.post('/analysis/spc/reference', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+};
+
 // --- 用户认证服务 ---
 
 export const loginUser = async (username: string, password: string): Promise<User> => {
