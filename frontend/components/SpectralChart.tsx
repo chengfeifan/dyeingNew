@@ -42,6 +42,50 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
     });
   }, [rawChartData, rangeMin, rangeMax]);
 
+  const yDomain = useMemo<[number, number]>(() => {
+    if (!chartData.length) return [-0.1, 1.1];
+
+    const activeKeys = (Object.keys(visibleLines) as Array<keyof typeof visibleLines>).filter(
+      (key) => visibleLines[key]
+    );
+
+    if (!activeKeys.length) return [-0.1, 1.1];
+
+    const values = chartData.flatMap((row) =>
+      activeKeys
+        .map((key) => Number(row[key]))
+        .filter((value) => Number.isFinite(value))
+    );
+
+    if (!values.length) return [-0.1, 1.1];
+
+    const sorted = [...values].sort((a, b) => a - b);
+    const quantile = (q: number) => {
+      const idx = Math.min(sorted.length - 1, Math.max(0, Math.floor((sorted.length - 1) * q)));
+      return sorted[idx];
+    };
+
+    let min = quantile(0.01);
+    let max = quantile(0.99);
+
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return [-0.1, 1.1];
+    if (min === max) {
+      const pad = Math.max(Math.abs(min) * 0.1, 0.1);
+      return [min - pad, max + pad];
+    }
+
+    const pad = Math.max((max - min) * 0.08, 0.05);
+    min -= pad;
+    max += pad;
+
+    if (visibleLines.T && !visibleLines.A && !visibleLines.I_corr) {
+      min = Math.max(min, -0.05);
+      max = Math.min(max, 1.2);
+    }
+
+    return [min, max];
+  }, [chartData, visibleLines]);
+
   const toggleLine = (key: keyof typeof visibleLines) => {
     setVisibleLines(prev => ({ ...prev, [key]: !prev[key] }));
   };
@@ -132,7 +176,7 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
                 stroke="#475569"
                 tickFormatter={(value: number) => Number(value).toFixed(1)}
             />
-            <YAxis tick={{ fontSize: 12, fill: '#94a3b8' }} stroke="#475569" />
+            <YAxis domain={yDomain} tick={{ fontSize: 12, fill: '#94a3b8' }} stroke="#475569" />
             <Tooltip 
                 contentStyle={{ backgroundColor: '#0f172a', borderRadius: '6px', border: '1px solid #334155', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)', color: '#f1f5f9' }}
                 itemStyle={{ color: '#e2e8f0' }}
@@ -141,13 +185,13 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
             <Legend verticalAlign="top" height={36} wrapperStyle={{ color: '#cbd5e1' }}/>
             
             {visibleLines.I_corr && (
-                <Line type="monotone" dataKey="I_corr" stroke="#3b82f6" dot={false} strokeWidth={2} name="I_corr (Sample - Dark)" />
+                <Line type="monotone" dataKey="I_corr" stroke="#3b82f6" dot={false} strokeWidth={2} name="I_corr (Sample - Dark)" isAnimationActive={false} />
             )}
             {visibleLines.T && (
-                <Line type="monotone" dataKey="T" stroke="#10b981" dot={false} strokeWidth={2} name="Transmittance" />
+                <Line type="monotone" dataKey="T" stroke="#10b981" dot={false} strokeWidth={2} name="Transmittance" isAnimationActive={false} />
             )}
             {visibleLines.A && (
-                <Line type="monotone" dataKey="A" stroke="#ef4444" dot={false} strokeWidth={2} name="Absorbance (-log10 T)" />
+                <Line type="monotone" dataKey="A" stroke="#ef4444" dot={false} strokeWidth={2} name="Absorbance (-log10 T)" isAnimationActive={false} />
             )}
           </LineChart>
         </ResponsiveContainer>
