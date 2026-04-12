@@ -106,7 +106,7 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
   };
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col w-full">
       <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
         <div>
             <h3 className="text-xl font-bold text-slate-100">{data.meta.name || "Analysis Result"}</h3>
