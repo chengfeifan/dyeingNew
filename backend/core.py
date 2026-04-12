@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, Iterable, List
 import numpy as np
 import json
 
@@ -78,6 +78,61 @@ def build_export_columns(x, I_corr, T, A, out_corr=True, out_T=True, out_A=True)
         cols["A"] = A
     return cols
 
+def apply_wavelength_range(
+    wavelength: np.ndarray,
+    *spectra: np.ndarray,
+    min_nm: float = 380.0,
+    max_nm: float = 780.0,
+) -> Tuple[np.ndarray, ...]:
+    wl = np.asarray(wavelength, dtype=float)
+    if max_nm < min_nm:
+        min_nm, max_nm = max_nm, min_nm
+    mask = (wl >= float(min_nm)) & (wl <= float(max_nm))
+    if not np.any(mask):
+        raise ValueError(f"所选波长范围 {min_nm}-{max_nm}nm 无有效数据点")
+    trimmed = [wl[mask]]
+    for spectrum in spectra:
+        arr = np.asarray(spectrum, dtype=float)
+        if arr.shape != wl.shape:
+            raise ValueError("光谱数据长度与波长轴不一致")
+        trimmed.append(arr[mask])
+    return tuple(trimmed)
+
+def pca_fit(data_matrix: np.ndarray, n_components: int = 2) -> Dict[str, np.ndarray]:
+    X = np.asarray(data_matrix, dtype=float)
+    if X.ndim != 2:
+        raise ValueError("PCA 输入矩阵必须是二维")
+    n_samples, n_features = X.shape
+    if n_samples < 2 or n_features < 2:
+        raise ValueError("PCA 至少需要 2 条样本且每条样本至少 2 个特征点")
+    k = max(1, min(n_components, n_samples, n_features))
+    mean = np.mean(X, axis=0)
+    centered = X - mean
+    _, singular_values, vt = np.linalg.svd(centered, full_matrices=False)
+    components = vt[:k]
+    explained_variance = (singular_values ** 2) / max(n_samples - 1, 1)
+    total_var = np.sum(explained_variance)
+    ratios = explained_variance[:k] / total_var if total_var > 0 else np.zeros(k)
+    scores = centered @ components.T
+    return {
+        "mean": mean,
+        "components": components,
+        "scores": scores,
+        "explained_variance_ratio": ratios,
+    }
+
+def pca_transform(data_matrix: np.ndarray, mean: np.ndarray, components: np.ndarray) -> np.ndarray:
+    X = np.asarray(data_matrix, dtype=float)
+    mu = np.asarray(mean, dtype=float)
+    comp = np.asarray(components, dtype=float)
+    if X.ndim != 2:
+        raise ValueError("待投影数据必须是二维")
+    if mu.ndim != 1 or comp.ndim != 2:
+        raise ValueError("PCA 模型参数格式错误")
+    if X.shape[1] != mu.shape[0] or comp.shape[1] != mu.shape[0]:
+        raise ValueError("待投影数据维度与 PCA 模型不匹配")
+    return (X - mu) @ comp.T
+
 def ndarray_to_list_dict(d: Dict[str, np.ndarray]) -> Dict[str, list]:
     return {k: np.asarray(v, dtype=float).tolist() for k, v in d.items()}
 
@@ -102,3 +157,101 @@ def solve_non_negative_least_squares(
     rmse = float(np.sqrt(np.mean(residual ** 2)))
     residual_norm = float(np.linalg.norm(residual))
     return coeffs, fitted, rmse, residual_norm
+
+def ensure_sorted_spectrum(
+    wavelength: np.ndarray, absorbance: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray]:
+    if wavelength.ndim != 1 or absorbance.ndim != 1:
+        raise ValueError("光谱数组必须是一维")
+    if wavelength.shape[0] != absorbance.shape[0]:
+        raise ValueError("波长与吸光度长度不一致")
+    if np.all(np.diff(wavelength) > 0):
+        return wavelength, absorbance
+    if np.all(np.diff(wavelength) < 0):
+        return wavelength[::-1], absorbance[::-1]
+    idx = np.argsort(wavelength)
+    return wavelength[idx], absorbance[idx]
+
+def interp_absorbance(
+    wavelength: np.ndarray, absorbance: np.ndarray, nm: float
+) -> float:
+    wavelength, absorbance = ensure_sorted_spectrum(wavelength, absorbance)
+    return float(np.interp(nm, wavelength, absorbance))
+
+def integrate_trapezoid(
+    wavelength: np.ndarray,
+    absorbance: np.ndarray,
+    nm_left: float,
+    nm_right: float
+) -> float:
+    if nm_right <= nm_left:
+        raise ValueError("积分区间右端必须大于左端")
+    wavelength, absorbance = ensure_sorted_spectrum(wavelength, absorbance)
+    left = max(nm_left, float(wavelength[0]))
+    right = min(nm_right, float(wavelength[-1]))
+    if right <= left:
+        return 0.0
+    mask = (wavelength > left) & (wavelength < right)
+    wl_segment = np.concatenate(([left], wavelength[mask], [right]))
+    abs_left = np.interp(left, wavelength, absorbance)
+    abs_right = np.interp(right, wavelength, absorbance)
+    abs_segment = np.concatenate(([abs_left], absorbance[mask], [abs_right]))
+    return float(np.trapz(abs_segment, wl_segment))
+
+def derivative_central(wavelength: np.ndarray, values: np.ndarray) -> np.ndarray:
+    wavelength, values = ensure_sorted_spectrum(wavelength, values)
+    return np.gradient(values, wavelength)
+
+def solve_linear_or_lstsq(K: np.ndarray, rhs: np.ndarray) -> np.ndarray:
+    K = np.asarray(K, dtype=float)
+    rhs = np.asarray(rhs, dtype=float)
+    if K.ndim != 2:
+        raise ValueError("K 必须是二维矩阵")
+    if rhs.ndim != 1 or rhs.shape[0] != K.shape[0]:
+        raise ValueError("rhs 维度与 K 不匹配")
+    coeffs, _, _, _ = np.linalg.lstsq(K, rhs, rcond=None)
+    return coeffs
+
+def clip_negative_to_zero(values: Iterable[float]) -> List[float]:
+    return [float(v) if v > 0 else 0.0 for v in values]
+
+def estimate_by_lambda_equations(
+    wavelength: np.ndarray,
+    absorbance: np.ndarray,
+    K: np.ndarray,
+    b: np.ndarray,
+    feature_nms: Iterable[float]
+) -> List[float]:
+    y = [interp_absorbance(wavelength, absorbance, nm) for nm in feature_nms]
+    b_total = np.sum(b, axis=1)
+    rhs = np.asarray(y, dtype=float) - b_total
+    coeffs = solve_linear_or_lstsq(K, rhs)
+    return clip_negative_to_zero(coeffs)
+
+def estimate_by_peak_area(
+    wavelength: np.ndarray,
+    absorbance: np.ndarray,
+    K: np.ndarray,
+    b: np.ndarray,
+    feature_intervals: Iterable[Tuple[float, float]]
+) -> List[float]:
+    y = [
+        integrate_trapezoid(wavelength, absorbance, left, right)
+        for left, right in feature_intervals
+    ]
+    b_total = np.sum(b, axis=1)
+    rhs = np.asarray(y, dtype=float) - b_total
+    coeffs = solve_linear_or_lstsq(K, rhs)
+    return clip_negative_to_zero(coeffs)
+
+def ratio_derivative_feature(
+    wavelength: np.ndarray,
+    absorbance: np.ndarray,
+    divisor_absorbance: np.ndarray,
+    nm: float
+) -> float:
+    wavelength, absorbance = ensure_sorted_spectrum(wavelength, absorbance)
+    _, divisor_absorbance = ensure_sorted_spectrum(wavelength, divisor_absorbance)
+    ratio = absorbance / np.maximum(divisor_absorbance, EPS)
+    derivative = derivative_central(wavelength, ratio)
+    return float(np.interp(nm, wavelength, derivative))

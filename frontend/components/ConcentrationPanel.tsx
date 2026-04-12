@@ -1,10 +1,19 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { HistoryItem, ConcentrationResult } from '../types';
-import { fetchHistoryList, analyzeConcentration, updateHistoryItem, deleteHistoryItem } from '../services/api';
-import { BeakerIcon, PlayIcon, BookOpenIcon, TrashIcon, CheckIcon, XMarkIcon, PencilSquareIcon, ArrowDownTrayIcon, DocumentTextIcon, TableCellsIcon } from '@heroicons/react/24/outline';
+import { HistoryItem, ConcentrationResult, ConcentrationMethodResult, ProcessedData } from '../types';
+import { fetchHistoryList, analyzeConcentration, analyzeConcentrationMethods, fetchHistoryItem, updateHistoryItem, deleteHistoryItem, reprocessHistorySpectrum } from '../services/api';
+import { BeakerIcon, PlayIcon, BookOpenIcon, TrashIcon, CheckIcon, XMarkIcon, PencilSquareIcon, DocumentTextIcon, TableCellsIcon, ArchiveBoxIcon, EyeIcon } from '@heroicons/react/24/outline';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
+import { WavelengthColorBand } from './WavelengthColorBand';
 
-type Tab = 'analysis' | 'library';
+type Tab = 'analysis' | 'standard-library' | 'sample-library';
+type AnalysisMethod = 'nnls' | 'lambda_equations' | 'peak_area' | 'ratio_derivative_2c' | 'zero_cross_ratio_derivative_3c';
+type RatioMethodRow = {
+    component: string;
+    lambda_nm: string;
+    k: string;
+    b: string;
+    divisor_component?: string;
+};
 
 export const ConcentrationPanel: React.FC = () => {
     const [activeTab, setActiveTab] = useState<Tab>('analysis');
@@ -13,15 +22,44 @@ export const ConcentrationPanel: React.FC = () => {
     // Analysis State
     const [selectedSample, setSelectedSample] = useState<string>('');
     const [selectedStandards, setSelectedStandards] = useState<string[]>([]);
-    const [result, setResult] = useState<ConcentrationResult | null>(null);
+    const [standardSearch, setStandardSearch] = useState('');
+    const [result, setResult] = useState<ConcentrationResult | ConcentrationMethodResult | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [analysisMethod, setAnalysisMethod] = useState<AnalysisMethod>('nnls');
+    const [calibrationJson, setCalibrationJson] = useState<string>('');
+    const [lambdaPointsInput, setLambdaPointsInput] = useState<string>('');
+    const [areaIntervalsInput, setAreaIntervalsInput] = useState<string>('');
+    const [divisorStandard, setDivisorStandard] = useState<string>('');
+    const [divisorComponent, setDivisorComponent] = useState<string>('');
+    const [analysisRangeMinNm, setAnalysisRangeMinNm] = useState<string>('400');
+    const [analysisRangeMaxNm, setAnalysisRangeMaxNm] = useState<string>('780');
+    const [ratioRows, setRatioRows] = useState<RatioMethodRow[]>([
+        { component: '', lambda_nm: '', k: '', b: '' }
+    ]);
 
     // Library State
     const [editingItem, setEditingItem] = useState<string | null>(null);
     const [editForm, setEditForm] = useState<{name: string, concentration: string, type: string}>({
         name: '', concentration: '', type: 'standard'
     });
+    const [editFiles, setEditFiles] = useState<{ sample: File | null; water: File | null; dark: File | null }>({
+        sample: null, water: null, dark: null
+    });
+    const [editProcessParams, setEditProcessParams] = useState({
+        enableSmoothing: false,
+        smoothWindow: 11,
+        smoothOrder: 3,
+        rangeMinNm: 380,
+        rangeMaxNm: 780,
+    });
+    const [viewingItemName, setViewingItemName] = useState<string | null>(null);
+    const [viewingItemData, setViewingItemData] = useState<ProcessedData | null>(null);
+    const [viewRangeMin, setViewRangeMin] = useState<string>('380');
+    const [viewRangeMax, setViewRangeMax] = useState<string>('780');
+    const [viewSeriesKey, setViewSeriesKey] = useState<'I_corr' | 'T' | 'A'>('A');
+    const [librarySearch, setLibrarySearch] = useState<string>('');
+    const [libraryConcentrationFilter, setLibraryConcentrationFilter] = useState<'all' | 'with' | 'without'>('all');
 
     useEffect(() => {
         loadHistory();
@@ -37,7 +75,68 @@ export const ConcentrationPanel: React.FC = () => {
     };
 
     const standards = useMemo(() => history.filter(h => h.meta?.save_type === 'standard'), [history]);
-    const samples = useMemo(() => history, [history]);
+    const samples = useMemo(() => history.filter(h => h.meta?.save_type !== 'standard'), [history]);
+    const filteredStandards = useMemo(() => {
+        const keyword = standardSearch.trim().toLowerCase();
+        if (!keyword) return standards;
+        return standards.filter(std => {
+            const name = std.name || '';
+            const dyeCode = std.meta?.dye_code || '';
+            return [name, std.filename, dyeCode].some(value => value.toLowerCase().includes(keyword));
+        });
+    }, [standards, standardSearch]);
+    const filteredLibraryItems = useMemo(() => {
+        const source = activeTab === 'standard-library' ? standards : samples;
+        const keyword = librarySearch.trim().toLowerCase();
+        return source.filter((item) => {
+            const matchesKeyword = !keyword || [
+                item.name || '',
+                item.filename || '',
+                item.meta?.concentration || '',
+                item.meta?.dye_code || '',
+                item.timestamp || ''
+            ].some((value) => value.toLowerCase().includes(keyword));
+            const concentration = (item.meta?.concentration || '').trim();
+            const matchesConcentration = libraryConcentrationFilter === 'all'
+                ? true
+                : libraryConcentrationFilter === 'with'
+                    ? concentration.length > 0
+                    : concentration.length === 0;
+            return matchesKeyword && matchesConcentration;
+        });
+    }, [activeTab, libraryConcentrationFilter, librarySearch, samples, standards]);
+
+    const parseNumberList = (input: string): number[] => {
+        return input
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean)
+            .map((value) => Number(value))
+            .filter((value) => !Number.isNaN(value));
+    };
+
+    const parseIntervalList = (input: string): [number, number][] => {
+        return input
+            .split(',')
+            .map((segment) => segment.trim())
+            .filter(Boolean)
+            .map((segment) => {
+                const [left, right] = segment.split(/[-~:]/).map((item) => item.trim());
+                return [Number(left), Number(right)] as [number, number];
+            })
+            .filter(([left, right]) => !Number.isNaN(left) && !Number.isNaN(right));
+    };
+
+    const parseCalibration = (): any | null => {
+        if (!calibrationJson.trim()) {
+            return null;
+        }
+        return JSON.parse(calibrationJson);
+    };
+
+    const isNNLSResult = (value: ConcentrationResult | ConcentrationMethodResult): value is ConcentrationResult => {
+        return (value as ConcentrationResult).components !== undefined;
+    };
 
     // --- Analysis Actions ---
 
@@ -50,12 +149,96 @@ export const ConcentrationPanel: React.FC = () => {
     };
 
     const handleAnalyze = async () => {
-        if (!selectedSample || selectedStandards.length === 0) return;
+        if (!selectedSample) return;
         setLoading(true);
         setError(null);
         setResult(null);
         try {
-            const res = await analyzeConcentration(selectedSample, selectedStandards);
+            const rangeMinNm = Number(analysisRangeMinNm);
+            const rangeMaxNm = Number(analysisRangeMaxNm);
+            if (Number.isNaN(rangeMinNm) || Number.isNaN(rangeMaxNm)) {
+                throw new Error("请输入有效的解析波长范围");
+            }
+            if (analysisMethod === 'nnls') {
+                if (selectedStandards.length === 0) {
+                    throw new Error("请选择至少一个标准品");
+                }
+                const res = await analyzeConcentration(selectedSample, selectedStandards, rangeMinNm, rangeMaxNm);
+                setResult(res);
+                return;
+            }
+
+            const sampleData = await fetchHistoryItem(selectedSample);
+            const wavelength = sampleData.data.lambda;
+            const absorbance = sampleData.data.A;
+            if (!wavelength?.length || !absorbance?.length) {
+                throw new Error("样品缺少光谱数据");
+            }
+
+            const payload: Record<string, any> = {
+                method: analysisMethod,
+                range_min_nm: rangeMinNm,
+                range_max_nm: rangeMaxNm,
+                sample: {
+                    wavelength_nm: wavelength,
+                    absorbance,
+                },
+            };
+
+            if (analysisMethod === 'lambda_equations' || analysisMethod === 'peak_area') {
+                const calibration = parseCalibration();
+                if (!calibration) {
+                    throw new Error("请提供矩阵标定 JSON");
+                }
+                payload.calibration = calibration;
+                if (analysisMethod === 'lambda_equations') {
+                    const lambdaPoints = parseNumberList(lambdaPointsInput);
+                    if (lambdaPoints.length > 0) {
+                        payload.lambda_points = lambdaPoints;
+                    }
+                }
+                if (analysisMethod === 'peak_area') {
+                    const intervals = parseIntervalList(areaIntervalsInput);
+                    if (intervals.length > 0) {
+                        payload.area_intervals = intervals;
+                    }
+                }
+            }
+
+            if (analysisMethod === 'ratio_derivative_2c' || analysisMethod === 'zero_cross_ratio_derivative_3c') {
+                if (!divisorStandard) {
+                    throw new Error("请选择除数参考谱");
+                }
+                const divisorData = await fetchHistoryItem(divisorStandard);
+                payload.divisor_reference = {
+                    wavelength_nm: divisorData.data.lambda,
+                    absorbance: divisorData.data.A,
+                };
+                if (divisorComponent) {
+                    payload.divisor_component = divisorComponent;
+                }
+                const methods = ratioRows
+                    .filter((row) => row.component && row.lambda_nm && row.k)
+                    .map((row) => ({
+                        component: row.component,
+                        divisor_component: row.divisor_component || undefined,
+                        lambda_nm: Number(row.lambda_nm),
+                        calib: {
+                            k: Number(row.k),
+                            b: Number(row.b || 0),
+                        },
+                    }));
+                if (methods.length === 0) {
+                    throw new Error("请填写至少一个组分的比值导数标定参数");
+                }
+                if (analysisMethod === 'ratio_derivative_2c') {
+                    payload.ratio_methods = methods;
+                } else {
+                    payload.zero_cross_methods = methods;
+                }
+            }
+
+            const res = await analyzeConcentrationMethods(payload);
             setResult(res);
         } catch (err: any) {
             setError(err?.message || "分析失败");
@@ -65,7 +248,7 @@ export const ConcentrationPanel: React.FC = () => {
     };
 
     const chartData = useMemo(() => {
-        if (!result) return [];
+        if (!result || !isNNLSResult(result)) return [];
         return result.chart_data.lambda.map((l, i) => ({
             lambda: l,
             original: result.chart_data.original[i],
@@ -73,6 +256,21 @@ export const ConcentrationPanel: React.FC = () => {
             residual: result.chart_data.residual[i]
         }));
     }, [result]);
+
+    const canAnalyze = useMemo(() => {
+        if (!selectedSample || loading) return false;
+        if (analysisMethod === 'nnls') {
+            return selectedStandards.length > 0;
+        }
+        if (analysisMethod === 'lambda_equations' || analysisMethod === 'peak_area') {
+            return calibrationJson.trim().length > 0;
+        }
+        if (analysisMethod === 'ratio_derivative_2c' || analysisMethod === 'zero_cross_ratio_derivative_3c') {
+            const hasRow = ratioRows.some((row) => row.component && row.lambda_nm && row.k);
+            return Boolean(divisorStandard) && hasRow;
+        }
+        return false;
+    }, [analysisMethod, calibrationJson, divisorStandard, loading, ratioRows, selectedSample, selectedStandards]);
 
     const handleExportJSON = () => {
         if (!result) return;
@@ -89,26 +287,42 @@ export const ConcentrationPanel: React.FC = () => {
 
     const handleExportCSV = () => {
         if (!result) return;
-        
-        // 1. Metrics Section
-        let csvContent = "--- Metrics ---\n";
-        csvContent += `RMSE,${result.metrics.rmse}\n`;
-        csvContent += `Residual Norm,${result.metrics.residual_norm}\n\n`;
-        
-        // 2. Components Section
-        csvContent += "--- Components ---\n";
-        csvContent += "Name,Concentration,Contribution(%)\n";
-        result.components.forEach(c => {
-            csvContent += `${c.name},${c.concentration},${c.contribution}\n`;
-        });
-        csvContent += "\n";
 
-        // 3. Spectral Data Section
-        csvContent += "--- Spectral Data ---\n";
-        csvContent += "Wavelength,Original,Fitted,Residual\n";
-        const { lambda, original, fitted, residual } = result.chart_data;
-        for(let i=0; i < lambda.length; i++) {
-            csvContent += `${lambda[i]},${original[i]},${fitted[i]},${residual[i]}\n`;
+        let csvContent = "";
+        if (isNNLSResult(result)) {
+            // 1. Metrics Section
+            csvContent += "--- Metrics ---\n";
+            csvContent += `RMSE,${result.metrics.rmse}\n`;
+            csvContent += `Residual Norm,${result.metrics.residual_norm}\n\n`;
+
+            // 2. Components Section
+            csvContent += "--- Components ---\n";
+            csvContent += "Name,Concentration,Contribution(%)\n";
+            result.components.forEach(c => {
+                csvContent += `${c.name},${c.concentration},${c.contribution}\n`;
+            });
+            csvContent += "\n";
+
+            // 3. Spectral Data Section
+            csvContent += "--- Spectral Data ---\n";
+            csvContent += "Wavelength,Original,Fitted,Residual\n";
+            const { lambda, original, fitted, residual } = result.chart_data;
+            for(let i=0; i < lambda.length; i++) {
+                csvContent += `${lambda[i]},${original[i]},${fitted[i]},${residual[i]}\n`;
+            }
+        } else {
+            csvContent += "--- Method ---\n";
+            csvContent += `Method,${result.method}\n\n`;
+
+            csvContent += "--- Concentrations ---\n";
+            csvContent += "Component,Concentration\n";
+            Object.entries(result.concentrations).forEach(([name, value]) => {
+                csvContent += `${name},${value}\n`;
+            });
+            csvContent += "\n";
+
+            csvContent += "--- Features ---\n";
+            csvContent += `Features,${JSON.stringify(result.features || {})}\n`;
         }
 
         const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -130,14 +344,30 @@ export const ConcentrationPanel: React.FC = () => {
             concentration: item.meta?.concentration || '',
             type: item.meta?.save_type || 'multicomponent'
         });
+        setEditFiles({ sample: null, water: null, dark: null });
+        setEditProcessParams({
+            enableSmoothing: Boolean(item.meta?.smooth_enabled),
+            smoothWindow: Number(item.meta?.smooth_window) || 11,
+            smoothOrder: Number(item.meta?.smooth_order) || 3,
+            rangeMinNm: Number(item.meta?.range_min_nm) || 380,
+            rangeMaxNm: Number(item.meta?.range_max_nm) || 780,
+        });
     };
 
     const cancelEdit = () => {
         setEditingItem(null);
+        setEditFiles({ sample: null, water: null, dark: null });
     };
 
     const saveEdit = async (filename: string) => {
         try {
+            if (editFiles.sample && editFiles.water && editFiles.dark) {
+                await reprocessHistorySpectrum(filename, {
+                    sample: editFiles.sample,
+                    water: editFiles.water,
+                    dark: editFiles.dark,
+                }, editProcessParams);
+            }
             await updateHistoryItem(filename, {
                 name: editForm.name,
                 concentration: editForm.concentration,
@@ -164,6 +394,41 @@ export const ConcentrationPanel: React.FC = () => {
         }
     };
 
+    const handleView = async (filename: string) => {
+        setViewingItemName(filename);
+        setViewingItemData(null);
+        setViewRangeMin('380');
+        setViewRangeMax('780');
+        setViewSeriesKey('A');
+        try {
+            const detail = await fetchHistoryItem(filename);
+            setViewingItemData(detail);
+        } catch (e) {
+            alert("加载光谱详情失败");
+            setViewingItemName(null);
+        }
+    };
+
+    const viewedChartData = useMemo(() => {
+        if (!viewingItemData) return [];
+        const min = Number(viewRangeMin);
+        const max = Number(viewRangeMax);
+        const hasMin = viewRangeMin.trim() !== '' && !Number.isNaN(min);
+        const hasMax = viewRangeMax.trim() !== '' && !Number.isNaN(max);
+        return viewingItemData.data.lambda
+            .map((lambda, i) => ({
+                lambda,
+                A: viewingItemData.data.A[i],
+                T: viewingItemData.data.T[i],
+                I_corr: viewingItemData.data.I_corr[i],
+            }))
+            .filter((point) => {
+                if (hasMin && point.lambda < min) return false;
+                if (hasMax && point.lambda > max) return false;
+                return true;
+            });
+    }, [viewRangeMax, viewRangeMin, viewingItemData]);
+
     return (
         <div className="max-w-7xl mx-auto flex flex-col h-full gap-4 text-slate-300">
             
@@ -181,15 +446,26 @@ export const ConcentrationPanel: React.FC = () => {
                     浓度解析
                 </button>
                 <button
-                    onClick={() => setActiveTab('library')}
+                    onClick={() => setActiveTab('standard-library')}
                     className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-colors ${
-                        activeTab === 'library' 
+                        activeTab === 'standard-library' 
                         ? 'bg-slate-800 text-indigo-400 shadow-sm border border-slate-700' 
                         : 'text-slate-500 hover:text-slate-300'
                     }`}
                 >
                     <BookOpenIcon className="w-4 h-4" />
                     标准库管理
+                </button>
+                <button
+                    onClick={() => setActiveTab('sample-library')}
+                    className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-colors ${
+                        activeTab === 'sample-library' 
+                        ? 'bg-slate-800 text-indigo-400 shadow-sm border border-slate-700' 
+                        : 'text-slate-500 hover:text-slate-300'
+                    }`}
+                >
+                    <ArchiveBoxIcon className="w-4 h-4" />
+                    样本库管理
                 </button>
             </div>
 
@@ -198,6 +474,207 @@ export const ConcentrationPanel: React.FC = () => {
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 h-full">
                     {/* Left Control Panel */}
                     <div className="lg:col-span-4 flex flex-col gap-6">
+                        {/* 0. Select Method */}
+                        <div className="bg-slate-900 p-5 rounded-lg shadow-sm border border-slate-800">
+                            <h3 className="font-semibold text-slate-200 mb-3 flex items-center gap-2">
+                                <span className="bg-indigo-900/50 text-indigo-400 w-6 h-6 rounded-full flex items-center justify-center text-xs border border-indigo-500/30">0</span>
+                                解析算法
+                            </h3>
+                            <select
+                                className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
+                                value={analysisMethod}
+                                onChange={(e) => setAnalysisMethod(e.target.value as AnalysisMethod)}
+                            >
+                                <option value="nnls">NNLS 标准基向量</option>
+                                <option value="lambda_equations">λmax 联立方程</option>
+                                <option value="peak_area">峰面积法</option>
+                                <option value="ratio_derivative_2c">比值导数（二组分）</option>
+                                <option value="zero_cross_ratio_derivative_3c">零交点比值导数（三组分）</option>
+                            </select>
+                            <p className="text-xs text-slate-500 mt-2">
+                                选择算法后，可在下方填写对应标定与特征参数。
+                            </p>
+                        </div>
+
+                        {analysisMethod !== 'nnls' && (
+                            <div className="bg-slate-900 p-5 rounded-lg shadow-sm border border-slate-800 space-y-4">
+                                <h3 className="font-semibold text-slate-200 flex items-center gap-2">
+                                    <span className="bg-indigo-900/50 text-indigo-400 w-6 h-6 rounded-full flex items-center justify-center text-xs border border-indigo-500/30">0.1</span>
+                                    算法配置
+                                </h3>
+
+                                {(analysisMethod === 'lambda_equations' || analysisMethod === 'peak_area') && (
+                                    <>
+                                        <div>
+                                            <label className="text-xs text-slate-400 block mb-1">矩阵标定 JSON</label>
+                                            <textarea
+                                                value={calibrationJson}
+                                                onChange={(e) => setCalibrationJson(e.target.value)}
+                                                placeholder='{"component_names":["X","Y"],"K":[[...],[...]],"b":[[...],[...]]}'
+                                                className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200 h-28"
+                                            />
+                                        </div>
+                                        {analysisMethod === 'lambda_equations' && (
+                                            <div>
+                                                <label className="text-xs text-slate-400 block mb-1">特征波长点 (nm，逗号分隔)</label>
+                                                <input
+                                                    value={lambdaPointsInput}
+                                                    onChange={(e) => setLambdaPointsInput(e.target.value)}
+                                                    placeholder="519,437,577"
+                                                    className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
+                                                />
+                                            </div>
+                                        )}
+                                        {analysisMethod === 'peak_area' && (
+                                            <div>
+                                                <label className="text-xs text-slate-400 block mb-1">峰面积区间 (nm，逗号分隔)</label>
+                                                <input
+                                                    value={areaIntervalsInput}
+                                                    onChange={(e) => setAreaIntervalsInput(e.target.value)}
+                                                    placeholder="499-543,412-452,552-606"
+                                                    className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
+                                                />
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+
+                                {(analysisMethod === 'ratio_derivative_2c' || analysisMethod === 'zero_cross_ratio_derivative_3c') && (
+                                    <>
+                                        <div>
+                                            <label className="text-xs text-slate-400 block mb-1">除数参考谱（标准品）</label>
+                                            <select
+                                                className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
+                                                value={divisorStandard}
+                                                onChange={(e) => setDivisorStandard(e.target.value)}
+                                            >
+                                                <option value="">-- 请选择标准品 --</option>
+                                                {standards.map(std => (
+                                                    <option key={std.filename} value={std.filename}>
+                                                        {std.name || std.filename}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="text-xs text-slate-400 block mb-1">除数组分名称（可选）</label>
+                                            <input
+                                                value={divisorComponent}
+                                                onChange={(e) => setDivisorComponent(e.target.value)}
+                                                placeholder="干扰组分I"
+                                                className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-xs text-slate-400">组分标定参数</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setRatioRows([...ratioRows, { component: '', lambda_nm: '', k: '', b: '' }])}
+                                                    className="text-xs text-indigo-400 hover:text-indigo-300"
+                                                >
+                                                    + 添加组分
+                                                </button>
+                                            </div>
+                                            {ratioRows.map((row, idx) => (
+                                                <div key={idx} className="grid grid-cols-1 gap-2 border border-slate-800 rounded-md p-3 bg-slate-950/40">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-xs text-slate-500">组分 {idx + 1}</span>
+                                                        {ratioRows.length > 1 && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setRatioRows(ratioRows.filter((_, i) => i !== idx))}
+                                                                className="text-xs text-slate-500 hover:text-red-400"
+                                                            >
+                                                                删除
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                    <input
+                                                        value={row.component}
+                                                        onChange={(e) => {
+                                                            const next = [...ratioRows];
+                                                            next[idx] = { ...row, component: e.target.value };
+                                                            setRatioRows(next);
+                                                        }}
+                                                        placeholder="组分名称"
+                                                        className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
+                                                    />
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <input
+                                                            value={row.lambda_nm}
+                                                            onChange={(e) => {
+                                                                const next = [...ratioRows];
+                                                                next[idx] = { ...row, lambda_nm: e.target.value };
+                                                                setRatioRows(next);
+                                                            }}
+                                                            placeholder="λ* (nm)"
+                                                            className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
+                                                        />
+                                                        <input
+                                                            value={row.divisor_component ?? ''}
+                                                            onChange={(e) => {
+                                                                const next = [...ratioRows];
+                                                                next[idx] = { ...row, divisor_component: e.target.value };
+                                                                setRatioRows(next);
+                                                            }}
+                                                            placeholder="除数组分(可选)"
+                                                            className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
+                                                        />
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-2">
+                                                        <input
+                                                            value={row.k}
+                                                            onChange={(e) => {
+                                                                const next = [...ratioRows];
+                                                                next[idx] = { ...row, k: e.target.value };
+                                                                setRatioRows(next);
+                                                            }}
+                                                            placeholder="斜率 k"
+                                                            className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
+                                                        />
+                                                        <input
+                                                            value={row.b}
+                                                            onChange={(e) => {
+                                                                const next = [...ratioRows];
+                                                                next[idx] = { ...row, b: e.target.value };
+                                                                setRatioRows(next);
+                                                            }}
+                                                            placeholder="截距 b"
+                                                            className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        )}
+                        <div className="bg-slate-900 p-5 rounded-lg shadow-sm border border-slate-800 space-y-3">
+                            <h3 className="font-semibold text-slate-200">光谱解析范围</h3>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-xs text-slate-400 block mb-1">起始波长 (nm)</label>
+                                    <input
+                                        type="number"
+                                        value={analysisRangeMinNm}
+                                        onChange={(e) => setAnalysisRangeMinNm(e.target.value)}
+                                        className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="text-xs text-slate-400 block mb-1">结束波长 (nm)</label>
+                                    <input
+                                        type="number"
+                                        value={analysisRangeMaxNm}
+                                        onChange={(e) => setAnalysisRangeMaxNm(e.target.value)}
+                                        className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
+                                    />
+                                </div>
+                            </div>
+                            <p className="text-xs text-slate-500">默认范围：400–780 nm</p>
+                        </div>
                         {/* 1. Select Sample */}
                         <div className="bg-slate-900 p-5 rounded-lg shadow-sm border border-slate-800">
                             <h3 className="font-semibold text-slate-200 mb-3 flex items-center gap-2">
@@ -207,7 +684,10 @@ export const ConcentrationPanel: React.FC = () => {
                             <select 
                                 className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
                                 value={selectedSample}
-                                onChange={(e) => setSelectedSample(e.target.value)}
+                                onChange={(e) => {
+                                    setSelectedSample(e.target.value);
+                                    setSelectedStandards([]);
+                                }}
                             >
                                 <option value="">-- 请选择历史记录 --</option>
                                 {samples.map(s => (
@@ -219,19 +699,29 @@ export const ConcentrationPanel: React.FC = () => {
                         </div>
 
                         {/* 2. Select Standards */}
-                        <div className="bg-slate-900 p-5 rounded-lg shadow-sm border border-slate-800 flex-1 flex flex-col min-h-[300px]">
+                        <div className="bg-slate-900 p-5 rounded-lg shadow-sm border border-slate-800 flex flex-col">
                             <h3 className="font-semibold text-slate-200 mb-3 flex items-center gap-2">
                                 <span className="bg-indigo-900/50 text-indigo-400 w-6 h-6 rounded-full flex items-center justify-center text-xs border border-indigo-500/30">2</span>
                                 选择标准品库 (基向量)
                             </h3>
+
+                            <div className="mb-3">
+                                <input
+                                    type="text"
+                                    value={standardSearch}
+                                    onChange={(e) => setStandardSearch(e.target.value)}
+                                    placeholder="搜索标准品库"
+                                    className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
+                                />
+                            </div>
                             
-                            <div className="flex-1 overflow-y-auto border border-slate-700 rounded-md p-2 space-y-1 bg-slate-950/30 custom-scrollbar">
-                                {standards.length === 0 && (
+                            <div className="h-64 overflow-y-auto border border-slate-700 rounded-md p-2 space-y-1 bg-slate-950/30 custom-scrollbar">
+                                {filteredStandards.length === 0 && (
                                     <div className="text-center text-slate-600 py-4 text-sm">
-                                        暂无标准品。<br/>请切换到“标准库管理”将光谱标记为标准品。
+                                        暂无匹配标准品。<br/>请切换到“标准库管理”将光谱标记为标准品。
                                     </div>
                                 )}
-                                {standards.map(std => (
+                                {filteredStandards.map(std => (
                                     <label key={std.filename} className="flex items-start gap-2 p-2 hover:bg-slate-800 rounded cursor-pointer border border-transparent hover:border-slate-700">
                                         <input 
                                             type="checkbox"
@@ -241,7 +731,12 @@ export const ConcentrationPanel: React.FC = () => {
                                         />
                                         <div>
                                             <div className="text-sm font-medium text-slate-300">{std.name}</div>
-                                            <div className="text-xs text-slate-500">Ref Conc: {std.meta?.concentration || 'N/A'}</div>
+                                            <div className="text-xs text-slate-500">
+                                                Ref Conc: {std.meta?.concentration || 'N/A'}
+                                            </div>
+                                            <div className="text-xs text-slate-500">
+                                                Dye Code: {std.meta?.dye_code || 'N/A'}
+                                            </div>
                                         </div>
                                     </label>
                                 ))}
@@ -250,7 +745,7 @@ export const ConcentrationPanel: React.FC = () => {
 
                         <button 
                             onClick={handleAnalyze}
-                            disabled={!selectedSample || selectedStandards.length === 0 || loading}
+                            disabled={!canAnalyze}
                             className="w-full py-3 bg-indigo-600 text-white rounded-md font-semibold hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 transition-colors shadow-lg shadow-indigo-900/20 flex justify-center items-center gap-2 border border-transparent disabled:border-slate-700"
                         >
                             {loading ? (
@@ -258,7 +753,7 @@ export const ConcentrationPanel: React.FC = () => {
                             ) : (
                                 <PlayIcon className="w-5 h-5" />
                             )}
-                            开始解析 (NNLS)
+                            开始解析 {analysisMethod === 'nnls' ? '(NNLS)' : ''}
                         </button>
                     </div>
 
@@ -297,59 +792,93 @@ export const ConcentrationPanel: React.FC = () => {
                                     </div>
                                 </div>
                                 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                                     <div>
-                                        <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">组分浓度</h4>
-                                        <table className="min-w-full divide-y divide-slate-800 border border-slate-800 rounded-md overflow-hidden">
-                                            <thead className="bg-slate-950">
-                                                <tr>
-                                                    <th className="px-3 py-2 text-left text-xs font-medium text-slate-400 uppercase">组分</th>
-                                                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-400 uppercase">浓度 (Conc)</th>
-                                                    <th className="px-3 py-2 text-right text-xs font-medium text-slate-400 uppercase">占比 (%)</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="bg-slate-900 divide-y divide-slate-800">
-                                                {result.components.map((c, idx) => (
-                                                    <tr key={idx}>
-                                                        <td className="px-3 py-2 text-sm font-medium text-slate-300">{c.name}</td>
-                                                        <td className="px-3 py-2 text-sm text-right text-slate-400 font-mono">{c.concentration.toFixed(4)}</td>
-                                                        <td className="px-3 py-2 text-sm text-right text-indigo-400 font-mono">{c.contribution.toFixed(1)}%</td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                     </div>
-                                     
-                                     <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-800">
-                                        <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">拟合质量 metrics</h4>
-                                        <div className="space-y-2">
-                                            <div className="flex justify-between">
-                                                <span className="text-sm text-slate-500">RMSE:</span>
-                                                <span className="text-sm font-mono font-bold text-slate-300">{result.metrics.rmse.toExponential(3)}</span>
+                                {isNNLSResult(result) ? (
+                                    <>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                                            <div>
+                                                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">组分浓度</h4>
+                                                <table className="min-w-full divide-y divide-slate-800 border border-slate-800 rounded-md overflow-hidden">
+                                                    <thead className="bg-slate-950">
+                                                        <tr>
+                                                            <th className="px-3 py-2 text-left text-xs font-medium text-slate-400 uppercase">组分</th>
+                                                            <th className="px-3 py-2 text-right text-xs font-medium text-slate-400 uppercase">浓度 (Conc)</th>
+                                                            <th className="px-3 py-2 text-right text-xs font-medium text-slate-400 uppercase">占比 (%)</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="bg-slate-900 divide-y divide-slate-800">
+                                                        {result.components.map((c, idx) => (
+                                                            <tr key={idx}>
+                                                                <td className="px-3 py-2 text-sm font-medium text-slate-300">{c.name}</td>
+                                                                <td className="px-3 py-2 text-sm text-right text-slate-400 font-mono">{c.concentration.toFixed(4)}</td>
+                                                                <td className="px-3 py-2 text-sm text-right text-indigo-400 font-mono">{c.contribution.toFixed(1)}%</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
                                             </div>
-                                            <div className="flex justify-between">
-                                                <span className="text-sm text-slate-500">Residual Norm:</span>
-                                                <span className="text-sm font-mono font-bold text-slate-300">{result.metrics.residual_norm.toFixed(4)}</span>
+
+                                            <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-800">
+                                                <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">拟合质量 metrics</h4>
+                                                <div className="space-y-2">
+                                                    <div className="flex justify-between">
+                                                        <span className="text-sm text-slate-500">RMSE:</span>
+                                                        <span className="text-sm font-mono font-bold text-slate-300">{result.metrics.rmse.toExponential(3)}</span>
+                                                    </div>
+                                                    <div className="flex justify-between">
+                                                        <span className="text-sm text-slate-500">Residual Norm:</span>
+                                                        <span className="text-sm font-mono font-bold text-slate-300">{result.metrics.residual_norm.toFixed(4)}</span>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
-                                     </div>
-                                </div>
 
-                                <div className="h-[400px] w-full mt-6">
-                                    <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">光谱拟合图</h4>
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 20, left: 0 }}>
-                                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                                            <XAxis dataKey="lambda" tick={{ fontSize: 11, fill: '#94a3b8' }} label={{ value: 'Wavelength', position: 'insideBottom', offset: -5, fill: '#64748b' }} stroke="#475569" />
-                                            <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} stroke="#475569" />
-                                            <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderRadius: '6px', border: '1px solid #334155', color: '#f1f5f9' }} />
-                                            <Legend verticalAlign="top" height={36} wrapperStyle={{ color: '#cbd5e1' }} />
-                                            <Line type="monotone" dataKey="original" stroke="#94a3b8" strokeWidth={2} dot={false} name="Experimental" />
-                                            <Line type="monotone" dataKey="fitted" stroke="#6366f1" strokeWidth={2} dot={false} name="Fitted (NNLS)" />
-                                            <Line type="monotone" dataKey="residual" stroke="#ef4444" strokeWidth={1} dot={false} name="Residual" />
-                                        </LineChart>
-                                    </ResponsiveContainer>
-                                </div>
+                                        <div className="h-[400px] w-full mt-6">
+                                            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">光谱拟合图</h4>
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 20, left: 0 }}>
+                                                    <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                                                    <XAxis dataKey="lambda" tick={{ fontSize: 11, fill: '#94a3b8' }} label={{ value: 'Wavelength', position: 'insideBottom', offset: -5, fill: '#64748b' }} stroke="#475569" />
+                                                    <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} stroke="#475569" />
+                                                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderRadius: '6px', border: '1px solid #334155', color: '#f1f5f9' }} />
+                                                    <Legend verticalAlign="top" height={36} wrapperStyle={{ color: '#cbd5e1' }} />
+                                                    <Line type="monotone" dataKey="original" stroke="#94a3b8" strokeWidth={2} dot={false} name="Experimental" />
+                                                    <Line type="monotone" dataKey="fitted" stroke="#6366f1" strokeWidth={2} dot={false} name="Fitted (NNLS)" />
+                                                    <Line type="monotone" dataKey="residual" stroke="#ef4444" strokeWidth={1} dot={false} name="Residual" />
+                                                </LineChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="space-y-4">
+                                        <div>
+                                            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">方法输出</h4>
+                                            <p className="text-sm text-slate-400">Method: <span className="text-indigo-400 font-mono">{result.method}</span></p>
+                                        </div>
+                                        <div>
+                                            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">组分浓度</h4>
+                                            <table className="min-w-full divide-y divide-slate-800 border border-slate-800 rounded-md overflow-hidden">
+                                                <thead className="bg-slate-950">
+                                                    <tr>
+                                                        <th className="px-3 py-2 text-left text-xs font-medium text-slate-400 uppercase">组分</th>
+                                                        <th className="px-3 py-2 text-right text-xs font-medium text-slate-400 uppercase">浓度</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="bg-slate-900 divide-y divide-slate-800">
+                                                    {Object.entries(result.concentrations).map(([name, value]) => (
+                                                        <tr key={name}>
+                                                            <td className="px-3 py-2 text-sm font-medium text-slate-300">{name}</td>
+                                                            <td className="px-3 py-2 text-sm text-right text-slate-400 font-mono">{value.toFixed(4)}</td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        <div className="bg-slate-950/50 p-4 rounded-lg border border-slate-800">
+                                            <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">特征参数</h4>
+                                            <pre className="text-xs text-slate-400 whitespace-pre-wrap break-words">{JSON.stringify(result.features || {}, null, 2)}</pre>
+                                        </div>
+                                    </div>
+                                )}
 
                             </div>
                         )}
@@ -367,15 +896,45 @@ export const ConcentrationPanel: React.FC = () => {
                 <div className="bg-slate-900 rounded-lg shadow-sm border border-slate-800 p-6 overflow-hidden flex flex-col h-[calc(100vh-180px)]">
                     <div className="flex justify-between items-center mb-6">
                         <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2">
-                            <BookOpenIcon className="w-5 h-5 text-indigo-500" />
-                            光谱标准库管理
+                            {activeTab === 'standard-library' ? (
+                                <BookOpenIcon className="w-5 h-5 text-indigo-500" />
+                            ) : (
+                                <ArchiveBoxIcon className="w-5 h-5 text-indigo-500" />
+                            )}
+                            {activeTab === 'standard-library' ? '标准库管理' : '样本库管理'}
                         </h3>
                         <p className="text-sm text-slate-500">
-                            在此处管理历史光谱的属性。将其类型设为“Standard”即可在浓度解析中作为标准品使用。
+                            {activeTab === 'standard-library'
+                                ? '在此处管理标准品库。将其类型设为“Standard”即可在浓度解析中作为标准品使用。'
+                                : '在此处管理样本库数据，可将其类型设为“Standard”移动到标准库。'}
                         </p>
                     </div>
 
                     <div className="overflow-auto flex-1 custom-scrollbar">
+                        <div className="mb-4 flex flex-wrap items-end gap-3">
+                            <div>
+                                <label className="text-xs text-slate-500 block mb-1">搜索</label>
+                                <input
+                                    type="text"
+                                    value={librarySearch}
+                                    onChange={(e) => setLibrarySearch(e.target.value)}
+                                    placeholder="按名称/文件名/时间筛选"
+                                    className="w-64 bg-slate-800 border-slate-700 rounded-md text-sm text-slate-200"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-xs text-slate-500 block mb-1">浓度筛选</label>
+                                <select
+                                    value={libraryConcentrationFilter}
+                                    onChange={(e) => setLibraryConcentrationFilter(e.target.value as 'all' | 'with' | 'without')}
+                                    className="bg-slate-800 border-slate-700 rounded-md text-sm text-slate-200"
+                                >
+                                    <option value="all">全部</option>
+                                    <option value="with">仅有标定浓度</option>
+                                    <option value="without">仅无标定浓度</option>
+                                </select>
+                            </div>
+                        </div>
                         <table className="min-w-full divide-y divide-slate-800">
                             <thead className="bg-slate-950 sticky top-0 z-10">
                                 <tr>
@@ -387,7 +946,7 @@ export const ConcentrationPanel: React.FC = () => {
                                 </tr>
                             </thead>
                             <tbody className="bg-slate-900 divide-y divide-slate-800">
-                                {history.map((item) => (
+                                {filteredLibraryItems.map((item) => (
                                     <tr key={item.filename} className="hover:bg-slate-800 transition-colors">
                                         {editingItem === item.filename ? (
                                             <>
@@ -398,6 +957,34 @@ export const ConcentrationPanel: React.FC = () => {
                                                         value={editForm.name}
                                                         onChange={(e) => setEditForm({...editForm, name: e.target.value})}
                                                     />
+                                                    <div className="mt-2 space-y-2">
+                                                        <div className="text-xs text-slate-500">可选：重新上传光谱并重算</div>
+                                                        {(['sample', 'water', 'dark'] as const).map((key) => (
+                                                            <input
+                                                                key={key}
+                                                                type="file"
+                                                                accept=".spc"
+                                                                onChange={(e) => setEditFiles((prev) => ({ ...prev, [key]: e.target.files?.[0] || null }))}
+                                                                className="block w-full text-xs text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:bg-slate-800 file:text-indigo-400 bg-slate-950/50 rounded-md border border-slate-700"
+                                                            />
+                                                        ))}
+                                                        <div className="grid grid-cols-2 gap-2">
+                                                            <input
+                                                                type="number"
+                                                                value={editProcessParams.rangeMinNm}
+                                                                onChange={(e) => setEditProcessParams((prev) => ({ ...prev, rangeMinNm: Number(e.target.value) || 380 }))}
+                                                                placeholder="最小波长"
+                                                                className="bg-slate-800 border-slate-600 rounded text-xs w-full text-slate-200"
+                                                            />
+                                                            <input
+                                                                type="number"
+                                                                value={editProcessParams.rangeMaxNm}
+                                                                onChange={(e) => setEditProcessParams((prev) => ({ ...prev, rangeMaxNm: Number(e.target.value) || 780 }))}
+                                                                placeholder="最大波长"
+                                                                className="bg-slate-800 border-slate-600 rounded text-xs w-full text-slate-200"
+                                                            />
+                                                        </div>
+                                                    </div>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     <select 
@@ -465,6 +1052,13 @@ export const ConcentrationPanel: React.FC = () => {
                                                         >
                                                             <PencilSquareIcon className="w-5 h-5" />
                                                         </button>
+                                                        <button
+                                                            onClick={() => handleView(item.filename)}
+                                                            className="text-slate-300 hover:text-indigo-300"
+                                                            title="View"
+                                                        >
+                                                            <EyeIcon className="w-5 h-5" />
+                                                        </button>
                                                         <button 
                                                             onClick={() => handleDelete(item.filename)}
                                                             className="text-red-500 hover:text-red-400"
@@ -479,7 +1073,120 @@ export const ConcentrationPanel: React.FC = () => {
                                     </tr>
                                 ))}
                             </tbody>
-                        </table>
+                                </table>
+                                {filteredLibraryItems.length === 0 && (
+                                    <div className="text-center text-sm text-slate-500 py-8">
+                                        当前筛选条件下没有匹配记录。
+                                    </div>
+                                )}
+                    </div>
+                </div>
+            )}
+
+            {viewingItemName && (
+                <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
+                    <div className="w-full max-w-5xl h-[80vh] bg-slate-900 border border-slate-700 rounded-lg shadow-xl flex flex-col">
+                        <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+                            <div>
+                                <h4 className="text-base font-semibold text-slate-100">光谱查看</h4>
+                                <p className="text-xs text-slate-500 mt-1">
+                                    {viewingItemData?.meta?.name || viewingItemName}
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => setViewingItemName(null)}
+                                className="text-slate-400 hover:text-slate-200"
+                            >
+                                <XMarkIcon className="w-5 h-5" />
+                            </button>
+                        </div>
+                        {!viewingItemData ? (
+                            <div className="flex-1 flex items-center justify-center text-slate-500">
+                                加载中...
+                            </div>
+                        ) : (
+                            <div className="flex-1 p-5 overflow-hidden flex flex-col gap-4">
+                                <div className="flex gap-2 items-end">
+                                    <div>
+                                        <label className="text-xs text-slate-500 block mb-1">波长最小值</label>
+                                        <input
+                                            value={viewRangeMin}
+                                            onChange={(e) => setViewRangeMin(e.target.value)}
+                                            className="w-28 bg-slate-800 border-slate-700 rounded-md text-sm text-slate-200"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-xs text-slate-500 block mb-1">波长最大值</label>
+                                        <input
+                                            value={viewRangeMax}
+                                            onChange={(e) => setViewRangeMax(e.target.value)}
+                                            className="w-28 bg-slate-800 border-slate-700 rounded-md text-sm text-slate-200"
+                                        />
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            setViewRangeMin('380');
+                                            setViewRangeMax('780');
+                                        }}
+                                        className="px-3 py-2 text-xs text-slate-300 bg-slate-800 border border-slate-700 rounded-md"
+                                    >
+                                        重置范围
+                                    </button>
+                                </div>
+                                <div className="flex items-center gap-4 text-xs text-slate-300">
+                                    <label className="flex items-center gap-1 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="viewSeries"
+                                            checked={viewSeriesKey === 'I_corr'}
+                                            onChange={() => setViewSeriesKey('I_corr')}
+                                        />
+                                        <span className="text-blue-400">I_corr</span>
+                                    </label>
+                                    <label className="flex items-center gap-1 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="viewSeries"
+                                            checked={viewSeriesKey === 'T'}
+                                            onChange={() => setViewSeriesKey('T')}
+                                        />
+                                        <span className="text-emerald-400">Transmittance (T)</span>
+                                    </label>
+                                    <label className="flex items-center gap-1 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="viewSeries"
+                                            checked={viewSeriesKey === 'A'}
+                                            onChange={() => setViewSeriesKey('A')}
+                                        />
+                                        <span className="text-red-400">Absorbance (A)</span>
+                                    </label>
+                                </div>
+                                <div className="flex-1 min-h-[300px]">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <LineChart data={viewedChartData}>
+                                            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                                            <XAxis
+                                                dataKey="lambda"
+                                                stroke="#475569"
+                                                tick={{ fontSize: 11, fill: '#94a3b8' }}
+                                                tickFormatter={(value: number) => Number(value).toFixed(1)}
+                                            />
+                                            <YAxis stroke="#475569" tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                                            <Tooltip
+                                                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155' }}
+                                                labelFormatter={(value: number) => `${Number(value).toFixed(1)} nm`}
+                                            />
+                                            <Legend />
+                                            {viewSeriesKey === 'A' && <Line type="monotone" dataKey="A" stroke="#ef4444" dot={false} name="Absorbance" />}
+                                            {viewSeriesKey === 'T' && <Line type="monotone" dataKey="T" stroke="#10b981" dot={false} name="Transmittance" />}
+                                            {viewSeriesKey === 'I_corr' && <Line type="monotone" dataKey="I_corr" stroke="#3b82f6" dot={false} name="I_corr" />}
+                                        </LineChart>
+                                    </ResponsiveContainer>
+                                    <WavelengthColorBand />
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

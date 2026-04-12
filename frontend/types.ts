@@ -12,6 +12,7 @@ export interface ProcessedData {
     };
     save_type?: 'standard' | 'multicomponent';
     concentration?: string;
+    dye_code?: string;
     [key: string]: any;
   };
   data: {
@@ -26,6 +27,8 @@ export interface ProcessingParams {
   enableSmoothing: boolean;
   smoothWindow: number;
   smoothOrder: number;
+  rangeMinNm: number;
+  rangeMaxNm: number;
 }
 
 export interface HistoryItem {
@@ -35,6 +38,7 @@ export interface HistoryItem {
   meta?: {
       save_type?: 'standard' | 'multicomponent';
       concentration?: string;
+      dye_code?: string;
       [key: string]: any;
   }
 }
@@ -57,6 +61,12 @@ export interface ConcentrationResult {
     };
 }
 
+export interface ConcentrationMethodResult {
+    method: string;
+    concentrations: Record<string, number>;
+    features?: Record<string, any>;
+}
+
 export interface FabricParams {
     fabricType: string;
     weight: number; // grams
@@ -75,4 +85,23 @@ export interface User {
     role: 'admin' | 'user';
     lastLogin: string;
     password?: string; // Optional for frontend handling
+}
+
+export interface PcaPoint {
+  label: string;
+  pc1: number;
+  pc2: number;
+}
+
+export interface PcaModel {
+  wavelength_nm: number[];
+  mean: number[];
+  components: number[][];
+}
+
+export interface PcaLibraryResult {
+  points: PcaPoint[];
+  explained_variance_ratio: number[];
+  analysis_target?: 'I_corr' | 'T' | 'A';
+  model: PcaModel;
 }

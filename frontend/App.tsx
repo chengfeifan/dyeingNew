@@ -4,6 +4,7 @@ import { SpectralChart } from './components/SpectralChart';
 import { HistoryPanel } from './components/HistoryPanel';
 import { ConcentrationPanel } from './components/ConcentrationPanel';
 import { PredictionPanel } from './components/PredictionPanel';
+import { OnlineAnalysisPanel } from './components/OnlineAnalysisPanel';
 import { LoginPanel } from './components/LoginPanel';
 import { UserManagementPanel } from './components/UserManagementPanel';
 import { ProcessedData, ProcessingParams, HistoryItem, User } from './types';
@@ -30,7 +31,7 @@ import {
   ChevronDoubleRightIcon
 } from '@heroicons/react/24/outline';
 
-type Module = 'preprocessing' | 'concentration' | 'prediction' | 'users';
+type Module = 'preprocessing' | 'concentration' | 'prediction' | 'online-analysis' | 'users';
 
 const App: React.FC = () => {
   // Auth State
@@ -118,10 +119,15 @@ const App: React.FC = () => {
   };
 
   // Save to History
-  const handleSave = async (name: string, type: 'standard' | 'multicomponent', concentration?: string) => {
+  const handleSave = async (
+    name: string,
+    type: 'standard' | 'multicomponent',
+    concentration?: string,
+    dyeCode?: string
+  ) => {
     if (!data) return;
     try {
-      await saveHistory(name, data, type, concentration);
+      await saveHistory(name, data, type, concentration, dyeCode);
       alert("保存成功！");
       loadHistory();
     } catch (err) {
@@ -201,6 +207,7 @@ const App: React.FC = () => {
     { id: 'preprocessing', label: '光谱数据预处理', icon: ChartBarIcon },
     { id: 'concentration', label: '多组分光谱浓度解析', icon: BeakerIcon },
     { id: 'prediction', label: '实时上染预测', icon: PresentationChartLineIcon },
+    { id: 'online-analysis', label: '在线数据侧栏分析', icon: CalculatorIcon },
   ];
 
   if (currentUser.role === 'admin') {
@@ -395,6 +402,12 @@ const App: React.FC = () => {
           {activeModule === 'prediction' && (
             <div className="h-full">
               <PredictionPanel />
+            </div>
+          )}
+
+          {activeModule === 'online-analysis' && (
+            <div className="h-full">
+              <OnlineAnalysisPanel />
             </div>
           )}
 

@@ -1,9 +1,9 @@
 import axios, { AxiosError } from 'axios';
-import { ProcessedData, ProcessingParams, HistoryItem, ConcentrationResult, User } from '../types';
+import { ProcessedData, ProcessingParams, HistoryItem, ConcentrationResult, ConcentrationMethodResult, User, PcaLibraryResult, PcaModel } from '../types';
 
 const SESSION_KEY = 'spectral_app_session';
 const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
 const api = axios.create({
   baseURL: API_BASE,
@@ -58,8 +58,34 @@ export const processSpectra = async (
     form.append('enableSmoothing', String(params.enableSmoothing));
     form.append('smoothWindow', String(params.smoothWindow));
     form.append('smoothOrder', String(params.smoothOrder));
+    form.append('rangeMinNm', String(params.rangeMinNm));
+    form.append('rangeMaxNm', String(params.rangeMaxNm));
 
     const { data } = await api.post('/process', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return toProcessedData(data);
+  } catch (error) {
+    throw normalizeError(error);
+  }
+};
+
+export const reprocessHistorySpectrum = async (
+  filename: string,
+  files: { sample: File; water: File; dark: File },
+  params: ProcessingParams
+): Promise<ProcessedData> => {
+  try {
+    const form = new FormData();
+    form.append('sample', files.sample);
+    form.append('water', files.water);
+    form.append('dark', files.dark);
+    form.append('enableSmoothing', String(params.enableSmoothing));
+    form.append('smoothWindow', String(params.smoothWindow));
+    form.append('smoothOrder', String(params.smoothOrder));
+    form.append('rangeMinNm', String(params.rangeMinNm));
+    form.append('rangeMaxNm', String(params.rangeMaxNm));
+    const { data } = await api.post(`/history/${filename}/reprocess`, form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     return toProcessedData(data);
@@ -72,7 +98,8 @@ export const saveHistory = async (
   name: string,
   data: ProcessedData,
   saveType: 'standard' | 'multicomponent',
-  concentration?: string
+  concentration?: string,
+  dyeCode?: string
 ): Promise<void> => {
   try {
     await api.post('/save', {
@@ -83,6 +110,7 @@ export const saveHistory = async (
         name,
         save_type: saveType,
         concentration: concentration ?? data.meta.concentration,
+        dye_code: dyeCode ?? data.meta.dye_code,
       },
     });
   } catch (error) {
@@ -151,14 +179,62 @@ export const downloadHistoryZip = async (): Promise<Blob> => {
 
 export const analyzeConcentration = async (
   sampleFilename: string,
-  standardFilenames: string[]
+  standardFilenames: string[],
+  rangeMinNm: number = 400,
+  rangeMaxNm: number = 780
 ): Promise<ConcentrationResult> => {
   try {
     const { data } = await api.post('/analysis/concentration', {
       sample: sampleFilename,
       standards: standardFilenames,
+      range_min_nm: rangeMinNm,
+      range_max_nm: rangeMaxNm,
     });
     return data as ConcentrationResult;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+};
+
+export const analyzeConcentrationMethods = async (
+  payload: Record<string, any>
+): Promise<ConcentrationMethodResult> => {
+  try {
+    const { data } = await api.post('/analysis/concentration-methods', payload);
+    return data as ConcentrationMethodResult;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+};
+
+export const analyzeStandardLibraryPca = async (
+  standardNames: string[] = [],
+  analysisTarget: 'I_corr' | 'T' | 'A' = 'A'
+): Promise<PcaLibraryResult> => {
+  try {
+    const { data } = await api.post('/analysis/pca/library', {
+      standard_names: standardNames,
+      n_components: 2,
+      analysis_target: analysisTarget,
+    });
+    return data as PcaLibraryResult;
+  } catch (error) {
+    throw normalizeError(error);
+  }
+};
+
+export const projectRealtimePcaPath = async (
+  wavelengthNm: number[],
+  realtimeSeries: Array<{ label: string; absorbance: number[] }>,
+  model: PcaModel
+): Promise<Array<{ label: string; pc1: number; pc2: number }>> => {
+  try {
+    const { data } = await api.post('/analysis/pca/realtime', {
+      wavelength_nm: wavelengthNm,
+      realtime_series: realtimeSeries,
+      model,
+    });
+    return data.path || [];
   } catch (error) {
     throw normalizeError(error);
   }

@@ -2,6 +2,36 @@ from __future__ import annotations
 from pydantic import BaseModel, Field, validator
 from typing import List, Optional, Dict, Any
 
+class SpectrumPayload(BaseModel):
+    wavelength_nm: List[float]
+    absorbance: List[float]
+
+    @validator("absorbance")
+    def _validate_lengths(cls, v: List[float], values: Dict[str, Any]) -> List[float]:
+        wavelength = values.get("wavelength_nm")
+        if wavelength is not None and len(wavelength) != len(v):
+            raise ValueError("wavelength_nm 与 absorbance 长度不一致")
+        return v
+
+class LinearCalibPayload(BaseModel):
+    k: float
+    b: float
+    r2: Optional[float] = None
+
+class FeatureDefPayload(BaseModel):
+    kind: str = Field(..., description="wavelength/area_interval/ratio_derivative_point/zero_cross_ratio_derivative_point")
+    nm: Optional[float] = None
+    nm_left: Optional[float] = None
+    nm_right: Optional[float] = None
+    divisor_component: Optional[str] = None
+    target_component: Optional[str] = None
+
+class MatrixCalibPayload(BaseModel):
+    component_names: List[str]
+    feature_defs: List[FeatureDefPayload]
+    K: List[List[float]]
+    b: List[List[float]]
+
 class ProcessOptions(BaseModel):
     out_corr: bool = True
     out_T: bool = True
@@ -48,9 +78,55 @@ class UserPublic(BaseModel):
 class ConcentrationRequest(BaseModel):
     sample: str = Field(..., description="需要解析的样品名称")
     standards: List[str] = Field(..., description="标准样名称列表")
+    range_min_nm: float = Field(400.0, description="解析波长下限（nm）")
+    range_max_nm: float = Field(780.0, description="解析波长上限（nm）")
 
     @validator("standards")
     def _validate_standards(cls, v: List[str]) -> List[str]:
         if not v:
             raise ValueError("标准样列表不能为空")
         return v
+
+class ComponentMethodPayload(BaseModel):
+    component: str
+    divisor_component: Optional[str] = None
+    lambda_nm: Optional[float] = None
+    calib: LinearCalibPayload
+
+class ConcentrationAnalysisRequest(BaseModel):
+    method: str = Field(..., description="lambda_equations/peak_area/ratio_derivative_2c/zero_cross_ratio_derivative_3c")
+    sample: SpectrumPayload
+    range_min_nm: float = Field(400.0, description="解析波长下限（nm）")
+    range_max_nm: float = Field(780.0, description="解析波长上限（nm）")
+    calibration: Optional[MatrixCalibPayload] = None
+    lambda_points: Optional[List[float]] = None
+    area_intervals: Optional[List[List[float]]] = None
+    divisor_component: Optional[str] = None
+    divisor_reference: Optional[SpectrumPayload] = None
+    lambda_star_nm: Optional[float] = None
+    ratio_methods: Optional[List[ComponentMethodPayload]] = None
+    zero_cross_methods: Optional[List[ComponentMethodPayload]] = None
+
+class ConcentrationAnalysisResponse(BaseModel):
+    method: str
+    concentrations: Dict[str, float]
+    features: Dict[str, Any] = {}
+
+class PcaLibraryRequest(BaseModel):
+    standard_names: Optional[List[str]] = None
+    n_components: int = 2
+    analysis_target: str = Field("A", description="PCA 分析对象：I_corr/T/A")
+
+class PcaModelPayload(BaseModel):
+    wavelength_nm: List[float]
+    mean: List[float]
+    components: List[List[float]]
+
+class PcaRealtimeSeries(BaseModel):
+    label: str
+    absorbance: List[float]
+
+class PcaRealtimeProjectRequest(BaseModel):
+    wavelength_nm: List[float]
+    realtime_series: List[PcaRealtimeSeries]
+    model: PcaModelPayload

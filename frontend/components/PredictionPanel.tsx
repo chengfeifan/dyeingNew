@@ -265,7 +265,7 @@ export const PredictionPanel: React.FC = () => {
                             </div>
 
                             {/* Chart */}
-                            <div className="bg-slate-900 rounded-lg shadow-sm border border-slate-800 p-6 flex-1 min-h-[400px]">
+                            <div className="bg-slate-900 rounded-lg shadow-sm border border-slate-800 p-6 h-[400px]">
                                 <h4 className="text-sm font-bold text-slate-300 mb-4">反射率预测曲线 (R)</h4>
                                 <ResponsiveContainer width="100%" height="100%">
                                     <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
