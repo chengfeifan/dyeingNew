@@ -25,7 +25,7 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
       I_corr: data.data.I_corr[i],
       T: data.data.T[i],
       A: data.data.A[i],
-    }));
+    })).sort((a, b) => a.lambda - b.lambda);
   }, [data]);
 
   const chartData = useMemo(() => {
@@ -125,6 +125,8 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
             <XAxis 
                 dataKey="lambda" 
+                type="number"
+                domain={['dataMin', 'dataMax']}
                 label={{ value: 'Wavelength / Wavenumber', position: 'insideBottom', offset: -10, fill: '#64748b' }} 
                 tick={{ fontSize: 12, fill: '#94a3b8' }}
                 stroke="#475569"
