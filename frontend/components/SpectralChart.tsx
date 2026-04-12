@@ -184,7 +184,7 @@ export const SpectralChart: React.FC<Props> = ({ data }) => {
       </div>
 
       <div className="flex-1 min-h-0 flex flex-col">
-        <div className="w-full h-[420px] min-h-0">
+        <div className="flex-1 min-h-[400px]">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={chartData} margin={{ top: 5, right: 24, bottom: 20, left: 16 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
