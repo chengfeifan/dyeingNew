@@ -14,7 +14,7 @@ from schemas import (
     PcaLibraryRequest, PcaRealtimeProjectRequest
 )
 from core import (
-    read_spc_first_xy, interp_to, compute_corrected,
+    read_spc_first_xy, read_spectrum_first_xy, interp_to, compute_corrected,
     poly_smooth, build_export_columns, ndarray_to_list_dict,
     solve_non_negative_least_squares, estimate_by_lambda_equations,
     estimate_by_peak_area, ratio_derivative_feature,
@@ -66,9 +66,9 @@ async def process_spectra(
         p_w = await to_path(water)
         p_d = await to_path(dark)
 
-        x_s, y_s = read_spc_first_xy(p_s)
-        x_w, y_w = read_spc_first_xy(p_w)
-        x_d, y_d = read_spc_first_xy(p_d)
+        x_s, y_s = read_spectrum_first_xy(p_s)
+        x_w, y_w = read_spectrum_first_xy(p_w)
+        x_d, y_d = read_spectrum_first_xy(p_d)
 
         y_wi = interp_to(x_w, y_w, x_s)
         y_di = interp_to(x_d, y_d, x_s)
@@ -87,7 +87,7 @@ async def process_spectra(
         )
         cols = build_export_columns(x_s, I_corr, T, A, out_corr, out_T, out_A)
         meta = {
-            "name": sample.filename.replace(".spc", ""),
+            "name": Path(sample.filename).stem,
             "timestamp": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S"),
             "smooth_enabled": smooth_enabled,
             "smooth_window": smooth_window,
@@ -126,9 +126,9 @@ async def reprocess_history_item(
         p_s = await to_path(sample)
         p_w = await to_path(water)
         p_d = await to_path(dark)
-        x_s, y_s = read_spc_first_xy(p_s)
-        x_w, y_w = read_spc_first_xy(p_w)
-        x_d, y_d = read_spc_first_xy(p_d)
+        x_s, y_s = read_spectrum_first_xy(p_s)
+        x_w, y_w = read_spectrum_first_xy(p_w)
+        x_d, y_d = read_spectrum_first_xy(p_d)
         y_wi = interp_to(x_w, y_w, x_s)
         y_di = interp_to(x_d, y_d, x_s)
         I_corr, T, A = compute_corrected(y_s, y_wi, y_di)

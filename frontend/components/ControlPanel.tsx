@@ -41,7 +41,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
     if (files.sample && files.water && files.dark) {
       onProcess({ sample: files.sample, water: files.water, dark: files.dark }, params);
     } else {
-        alert("请选择所有三个 SPC 文件。");
+        alert("请上传样本光谱（CSV/SPC）以及水光谱、暗光谱（SPC）。");
     }
   };
 
@@ -50,7 +50,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
   return (
     <div className="bg-slate-900 rounded-lg shadow-sm border border-slate-800 p-5 space-y-6 text-slate-300">
       <div>
-        <h2 className="text-lg font-semibold text-slate-100 mb-4">输入文件 (.spc)</h2>
+        <h2 className="text-lg font-semibold text-slate-100 mb-4">输入文件 (Sample 支持 .csv/.spc)</h2>
         <div className="space-y-3">
           {[
             { key: 'sample', label: '样本光谱 (Sample)' },
@@ -64,7 +64,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
               <div className="relative">
                 <input
                   type="file"
-                  accept=".spc"
+                  accept={(item.key === 'sample') ? ".spc,.csv,.txt" : ".spc"}
                   onChange={handleFileChange(item.key as any)}
                   className="block w-full text-sm text-slate-400
                     file:mr-4 file:py-2 file:px-4

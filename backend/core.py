@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Tuple, Dict, Any, Iterable, List
 import numpy as np
 import json
+import csv
 
 try:
     import spc_io
@@ -21,6 +22,61 @@ def read_spc_first_xy(path: Path) -> Tuple[np.ndarray, np.ndarray]:
     x = np.asarray(sub.xarray, dtype=float)
     y = np.asarray(sub.yarray, dtype=float)
     return x, y
+
+def read_csv_first_xy(path: Path) -> Tuple[np.ndarray, np.ndarray]:
+    with open(path, "r", encoding="utf-8-sig") as f:
+        raw = f.read().strip()
+    if not raw:
+        raise ValueError(f"CSV 文件为空: {path}")
+
+    # 兼容把换行写成字面量 "\\n" 的导出格式
+    normalized = raw.replace("\\r", "\r").replace("\\n", "\n")
+    lines = [line for line in normalized.splitlines() if line.strip()]
+    if len(lines) < 2:
+        raise ValueError(f"CSV 至少应包含表头和一行数据: {path}")
+
+    sample_line = lines[0]
+    if "\t" in sample_line:
+        delimiter = "\t"
+    elif ";" in sample_line and "," not in sample_line:
+        delimiter = ";"
+    else:
+        delimiter = ","
+
+    reader = csv.DictReader(lines, delimiter=delimiter)
+    if not reader.fieldnames:
+        raise ValueError(f"CSV 缺少表头: {path}")
+    headers = {h.strip().lower(): h for h in reader.fieldnames if h is not None}
+    wl_key = next((headers[k] for k in ("wavelength", "lambda", "wl") if k in headers), None)
+    y_key = next((headers[k] for k in ("intensity", "i_corr", "i", "signal", "absorbance", "a") if k in headers), None)
+    if wl_key is None or y_key is None:
+        raise ValueError("CSV 必须包含 wavelength 和 intensity/absorbance 列")
+
+    wavelength: List[float] = []
+    intensity: List[float] = []
+    for row in reader:
+        try:
+            wl = float((row.get(wl_key) or "").strip())
+            y = float((row.get(y_key) or "").strip())
+        except Exception:
+            continue
+        wavelength.append(wl)
+        intensity.append(y)
+    if not wavelength:
+        raise ValueError(f"CSV 无有效数值数据: {path}")
+    return np.asarray(wavelength, dtype=float), np.asarray(intensity, dtype=float)
+
+def read_spectrum_first_xy(path: Path) -> Tuple[np.ndarray, np.ndarray]:
+    suffix = path.suffix.lower()
+    if suffix == ".spc":
+        return read_spc_first_xy(path)
+    if suffix in {".csv", ".txt"}:
+        return read_csv_first_xy(path)
+    # 尝试先按 CSV 读取，失败后回退 SPC
+    try:
+        return read_csv_first_xy(path)
+    except Exception:
+        return read_spc_first_xy(path)
 
 def interp_to(x_src: np.ndarray, y_src: np.ndarray, x_tgt: np.ndarray) -> np.ndarray:
     if not (np.all(np.diff(x_src) > 0) or np.all(np.diff(x_src) < 0)):
