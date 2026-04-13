@@ -5,7 +5,7 @@ import { BeakerIcon, PlayIcon, BookOpenIcon, TrashIcon, CheckIcon, XMarkIcon, Pe
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { WavelengthColorBand } from './WavelengthColorBand';
 
-type Tab = 'analysis' | 'standard-library' | 'sample-library';
+type Tab = 'analysis' | 'standard-library' | 'sample-library' | 'online-library';
 type AnalysisMethod = 'nnls' | 'lambda_equations' | 'peak_area' | 'ratio_derivative_2c' | 'zero_cross_ratio_derivative_3c';
 type RatioMethodRow = {
     component: string;
@@ -40,8 +40,8 @@ export const ConcentrationPanel: React.FC = () => {
 
     // Library State
     const [editingItem, setEditingItem] = useState<string | null>(null);
-    const [editForm, setEditForm] = useState<{name: string, concentration: string, type: string}>({
-        name: '', concentration: '', type: 'standard'
+    const [editForm, setEditForm] = useState<{name: string, concentration: string, orderNo: string, type: string}>({
+        name: '', concentration: '', orderNo: '', type: 'standard'
     });
     const [editFiles, setEditFiles] = useState<{ sample: File | null; water: File | null; dark: File | null }>({
         sample: null, water: null, dark: null
@@ -75,7 +75,8 @@ export const ConcentrationPanel: React.FC = () => {
     };
 
     const standards = useMemo(() => history.filter(h => h.meta?.save_type === 'standard'), [history]);
-    const samples = useMemo(() => history.filter(h => h.meta?.save_type !== 'standard'), [history]);
+    const onlineItems = useMemo(() => history.filter(h => h.meta?.save_type === 'online'), [history]);
+    const samples = useMemo(() => history.filter(h => h.meta?.save_type !== 'standard' && h.meta?.save_type !== 'online'), [history]);
     const filteredStandards = useMemo(() => {
         const keyword = standardSearch.trim().toLowerCase();
         if (!keyword) return standards;
@@ -86,7 +87,7 @@ export const ConcentrationPanel: React.FC = () => {
         });
     }, [standards, standardSearch]);
     const filteredLibraryItems = useMemo(() => {
-        const source = activeTab === 'standard-library' ? standards : samples;
+        const source = activeTab === 'standard-library' ? standards : activeTab === 'online-library' ? onlineItems : samples;
         const keyword = librarySearch.trim().toLowerCase();
         return source.filter((item) => {
             const matchesKeyword = !keyword || [
@@ -104,7 +105,7 @@ export const ConcentrationPanel: React.FC = () => {
                     : concentration.length === 0;
             return matchesKeyword && matchesConcentration;
         });
-    }, [activeTab, libraryConcentrationFilter, librarySearch, samples, standards]);
+    }, [activeTab, libraryConcentrationFilter, librarySearch, onlineItems, samples, standards]);
 
     const parseNumberList = (input: string): number[] => {
         return input
@@ -342,6 +343,7 @@ export const ConcentrationPanel: React.FC = () => {
         setEditForm({
             name: item.name || item.filename,
             concentration: item.meta?.concentration || '',
+            orderNo: item.meta?.order_no || '',
             type: item.meta?.save_type || 'multicomponent'
         });
         setEditFiles({ sample: null, water: null, dark: null });
@@ -371,7 +373,8 @@ export const ConcentrationPanel: React.FC = () => {
             await updateHistoryItem(filename, {
                 name: editForm.name,
                 concentration: editForm.concentration,
-                save_type: editForm.type
+                save_type: editForm.type,
+                order_no: editForm.orderNo
             });
             setEditingItem(null);
             loadHistory();
@@ -466,6 +469,17 @@ export const ConcentrationPanel: React.FC = () => {
                 >
                     <ArchiveBoxIcon className="w-4 h-4" />
                     样本库管理
+                </button>
+                <button
+                    onClick={() => setActiveTab('online-library')}
+                    className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-colors ${
+                        activeTab === 'online-library' 
+                        ? 'bg-slate-800 text-indigo-400 shadow-sm border border-slate-700' 
+                        : 'text-slate-500 hover:text-slate-300'
+                    }`}
+                >
+                    <ArchiveBoxIcon className="w-4 h-4" />
+                    在线数据库管理
                 </button>
             </div>
 
@@ -901,12 +915,14 @@ export const ConcentrationPanel: React.FC = () => {
                             ) : (
                                 <ArchiveBoxIcon className="w-5 h-5 text-indigo-500" />
                             )}
-                            {activeTab === 'standard-library' ? '标准库管理' : '样本库管理'}
+                            {activeTab === 'standard-library' ? '标准库管理' : activeTab === 'online-library' ? '在线数据库管理' : '样本库管理'}
                         </h3>
                         <p className="text-sm text-slate-500">
                             {activeTab === 'standard-library'
                                 ? '在此处管理标准品库。将其类型设为“Standard”即可在浓度解析中作为标准品使用。'
-                                : '在此处管理样本库数据，可将其类型设为“Standard”移动到标准库。'}
+                                : activeTab === 'online-library'
+                                    ? '在此处管理在线数据库记录，可维护 Online 类型和订单号。'
+                                    : '在此处管理样本库数据，可将其类型设为“Standard”移动到标准库。'}
                         </p>
                     </div>
 
@@ -940,7 +956,7 @@ export const ConcentrationPanel: React.FC = () => {
                                 <tr>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">名称</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">类型</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">标定浓度</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">标定浓度/订单号</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">时间</th>
                                     <th className="px-6 py-3 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">操作</th>
                                 </tr>
@@ -994,6 +1010,7 @@ export const ConcentrationPanel: React.FC = () => {
                                                     >
                                                         <option value="standard">Standard (标准品)</option>
                                                         <option value="multicomponent">Sample (样品)</option>
+                                                        <option value="online">Online (在线)</option>
                                                     </select>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
@@ -1004,6 +1021,14 @@ export const ConcentrationPanel: React.FC = () => {
                                                             value={editForm.concentration}
                                                             placeholder="e.g. 1.0 g/L"
                                                             onChange={(e) => setEditForm({...editForm, concentration: e.target.value})}
+                                                        />
+                                                    ) : editForm.type === 'online' ? (
+                                                        <input
+                                                            type="text"
+                                                            className="bg-slate-800 border-slate-600 rounded text-sm w-full focus:ring-indigo-500 focus:border-indigo-500 text-slate-200"
+                                                            value={editForm.orderNo}
+                                                            placeholder="订单号"
+                                                            onChange={(e) => setEditForm({...editForm, orderNo: e.target.value})}
                                                         />
                                                     ) : (
                                                         <span className="text-slate-600 text-sm">--</span>
@@ -1032,13 +1057,15 @@ export const ConcentrationPanel: React.FC = () => {
                                                     <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full border ${
                                                         item.meta?.save_type === 'standard' 
                                                         ? 'bg-emerald-900/30 text-emerald-400 border-emerald-900' 
-                                                        : 'bg-slate-800 text-slate-400 border-slate-700'
+                                                        : item.meta?.save_type === 'online'
+                                                            ? 'bg-cyan-900/30 text-cyan-300 border-cyan-800'
+                                                            : 'bg-slate-800 text-slate-400 border-slate-700'
                                                     }`}>
-                                                        {item.meta?.save_type === 'standard' ? 'Standard' : 'Sample'}
+                                                        {item.meta?.save_type === 'standard' ? 'Standard' : item.meta?.save_type === 'online' ? 'Online' : 'Sample'}
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400 font-mono">
-                                                    {item.meta?.concentration || '--'}
+                                                    {item.meta?.save_type === 'online' ? (item.meta?.order_no || '--') : (item.meta?.concentration || '--')}
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 font-mono">
                                                     {item.timestamp}

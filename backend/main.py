@@ -187,6 +187,8 @@ async def update_history(name: str, payload: HistoryUpdatePayload):
             updates["concentration"] = payload.concentration
         if payload.save_type is not None:
             updates["save_type"] = payload.save_type
+        if payload.order_no is not None:
+            updates["order_no"] = payload.order_no
         if updates:
             update_history_meta(final_name, updates)
         return load_json(final_name)

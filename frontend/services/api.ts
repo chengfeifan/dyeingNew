@@ -97,9 +97,10 @@ export const reprocessHistorySpectrum = async (
 export const saveHistory = async (
   name: string,
   data: ProcessedData,
-  saveType: 'standard' | 'multicomponent',
+  saveType: 'standard' | 'multicomponent' | 'online',
   concentration?: string,
-  dyeCode?: string
+  dyeCode?: string,
+  orderNo?: string
 ): Promise<void> => {
   try {
     await api.post('/save', {
@@ -111,6 +112,7 @@ export const saveHistory = async (
         save_type: saveType,
         concentration: concentration ?? data.meta.concentration,
         dye_code: dyeCode ?? data.meta.dye_code,
+        order_no: orderNo ?? data.meta.order_no,
       },
     });
   } catch (error) {
@@ -146,7 +148,7 @@ export const renameHistoryItem = async (filename: string, newName: string): Prom
 
 export const updateHistoryItem = async (
   filename: string,
-  update: { name?: string; concentration?: string; save_type?: string }
+  update: { name?: string; concentration?: string; save_type?: string; order_no?: string }
 ): Promise<void> => {
   try {
     await api.patch(`/history/${filename}`, {
@@ -154,6 +156,7 @@ export const updateHistoryItem = async (
       name: update.name,
       concentration: update.concentration,
       save_type: update.save_type,
+      order_no: update.order_no,
     });
   } catch (error) {
     throw normalizeError(error);
