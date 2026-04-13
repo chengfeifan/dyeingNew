@@ -10,9 +10,10 @@ export interface ProcessedData {
         water: string;
         dark: string;
     };
-    save_type?: 'standard' | 'multicomponent';
+    save_type?: 'standard' | 'multicomponent' | 'online';
     concentration?: string;
     dye_code?: string;
+    order_no?: string;
     [key: string]: any;
   };
   data: {
@@ -36,9 +37,10 @@ export interface HistoryItem {
   name: string;
   timestamp: string;
   meta?: {
-      save_type?: 'standard' | 'multicomponent';
+      save_type?: 'standard' | 'multicomponent' | 'online';
       concentration?: string;
       dye_code?: string;
+      order_no?: string;
       [key: string]: any;
   }
 }

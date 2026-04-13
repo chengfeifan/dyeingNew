@@ -56,6 +56,7 @@ class HistoryUpdatePayload(BaseModel):
     name: Optional[str] = Field(None, description="保持兼容的名称字段")
     concentration: Optional[str] = None
     save_type: Optional[str] = None
+    order_no: Optional[str] = None
 
     @property
     def target_name(self) -> Optional[str]:

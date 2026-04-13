@@ -121,13 +121,14 @@ const App: React.FC = () => {
   // Save to History
   const handleSave = async (
     name: string,
-    type: 'standard' | 'multicomponent',
+    type: 'standard' | 'multicomponent' | 'online',
     concentration?: string,
-    dyeCode?: string
+    dyeCode?: string,
+    orderNo?: string
   ) => {
     if (!data) return;
     try {
-      await saveHistory(name, data, type, concentration, dyeCode);
+      await saveHistory(name, data, type, concentration, dyeCode, orderNo);
       alert("保存成功！");
       loadHistory();
     } catch (err) {

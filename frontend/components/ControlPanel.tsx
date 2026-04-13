@@ -4,7 +4,7 @@ import { BoltIcon, FolderArrowDownIcon } from '@heroicons/react/24/outline';
 
 interface ControlPanelProps {
   onProcess: (files: { sample: File; water: File; dark: File }, params: ProcessingParams) => void;
-  onSave: (name: string, type: 'standard' | 'multicomponent', concentration?: string, dyeCode?: string) => void;
+  onSave: (name: string, type: 'standard' | 'multicomponent' | 'online', concentration?: string, dyeCode?: string, orderNo?: string) => void;
   loading: boolean;
   hasData: boolean;
 }
@@ -26,9 +26,10 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
 
   // Save State
   const [saveName, setSaveName] = useState('');
-  const [saveType, setSaveType] = useState<'standard' | 'multicomponent'>('standard');
+  const [saveType, setSaveType] = useState<'standard' | 'multicomponent' | 'online'>('standard');
   const [concentration, setConcentration] = useState('');
   const [dyeCode, setDyeCode] = useState('');
+  const [orderNo, setOrderNo] = useState('');
 
   const handleFileChange = (key: keyof typeof files) => (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -190,6 +191,17 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
                     />
                     <span className="text-sm text-slate-300">多组分光谱解析</span>
                 </label>
+                <label className="flex items-center space-x-2 cursor-pointer">
+                    <input 
+                        type="radio" 
+                        name="saveType"
+                        value="online"
+                        checked={saveType === 'online'}
+                        onChange={() => setSaveType('online')}
+                        className="bg-slate-800 border-slate-600 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-slate-900"
+                    />
+                    <span className="text-sm text-slate-300">在线数据 (Online)</span>
+                </label>
              </div>
 
            {saveType === 'standard' && (
@@ -216,6 +228,19 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
                     </div>
                  </div>
              )}
+
+            {saveType === 'online' && (
+                <div className="animate-fade-in">
+                  <label className="block text-xs font-medium text-slate-500 mb-1">订单号 (Order No.)</label>
+                  <input
+                      type="text"
+                      placeholder="例如: ORD-20260413-001"
+                      value={orderNo}
+                      onChange={(e) => setOrderNo(e.target.value)}
+                      className="w-full bg-slate-800 border-slate-700 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm text-slate-200"
+                  />
+                </div>
+             )}
            </div>
 
            <div className="flex gap-2">
@@ -227,8 +252,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
                 className="flex-1 bg-slate-800 border-slate-700 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500 text-slate-200"
              />
              <button
-                onClick={() => onSave(saveName, saveType, concentration, dyeCode)}
-                disabled={!saveName || (saveType === 'standard' && !concentration)}
+                onClick={() => onSave(saveName, saveType, concentration, dyeCode, orderNo)}
+                disabled={!saveName || (saveType === 'standard' && !concentration) || (saveType === 'online' && !orderNo)}
                 className="px-3 py-2 bg-emerald-700 text-white rounded-md hover:bg-emerald-600 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed flex items-center shadow-sm border border-emerald-600 disabled:border-slate-700"
              >
                 <FolderArrowDownIcon className="w-5 h-5" />
