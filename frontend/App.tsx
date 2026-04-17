@@ -5,6 +5,7 @@ import { HistoryPanel } from './components/HistoryPanel';
 import { ConcentrationPanel } from './components/ConcentrationPanel';
 import { PredictionPanel } from './components/PredictionPanel';
 import { OnlineAnalysisPanel } from './components/OnlineAnalysisPanel';
+import { SpectrumSynthesisPanel } from './components/SpectrumSynthesisPanel';
 import { LoginPanel } from './components/LoginPanel';
 import { UserManagementPanel } from './components/UserManagementPanel';
 import { ProcessedData, ProcessingParams, HistoryItem, User } from './types';
@@ -24,6 +25,7 @@ import {
   BeakerIcon, 
   PresentationChartLineIcon, 
   CalculatorIcon,
+  SwatchIcon,
   ClockIcon,
   UserCircleIcon,
   ArrowRightOnRectangleIcon,
@@ -31,7 +33,7 @@ import {
   ChevronDoubleRightIcon
 } from '@heroicons/react/24/outline';
 
-type Module = 'preprocessing' | 'concentration' | 'prediction' | 'online-analysis' | 'users';
+type Module = 'preprocessing' | 'concentration' | 'prediction' | 'online-analysis' | 'spectrum-synthesis' | 'users';
 
 const App: React.FC = () => {
   // Auth State
@@ -209,6 +211,7 @@ const App: React.FC = () => {
     { id: 'concentration', label: '多组分光谱浓度解析', icon: BeakerIcon },
     { id: 'prediction', label: '实时上染预测', icon: PresentationChartLineIcon },
     { id: 'online-analysis', label: '在线数据侧栏分析', icon: CalculatorIcon },
+    { id: 'spectrum-synthesis', label: '光谱合成分析', icon: SwatchIcon },
   ];
 
   if (currentUser.role === 'admin') {
@@ -409,6 +412,12 @@ const App: React.FC = () => {
           {activeModule === 'online-analysis' && (
             <div className="h-full">
               <OnlineAnalysisPanel />
+            </div>
+          )}
+
+          {activeModule === 'spectrum-synthesis' && (
+            <div className="h-full">
+              <SpectrumSynthesisPanel />
             </div>
           )}
 
