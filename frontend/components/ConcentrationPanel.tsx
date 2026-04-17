@@ -95,6 +95,8 @@ export const ConcentrationPanel: React.FC = () => {
                 item.filename || '',
                 item.meta?.concentration || '',
                 item.meta?.dye_code || '',
+                item.meta?.online_standard || '',
+                item.meta?.online_concentration || '',
                 item.timestamp || ''
             ].some((value) => value.toLowerCase().includes(keyword));
             const concentration = (item.meta?.concentration || '').trim();
@@ -956,7 +958,7 @@ export const ConcentrationPanel: React.FC = () => {
                                 <tr>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">名称</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">类型</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">标定浓度/订单号</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">标定浓度/订单号/标准染料/浓度</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-slate-400 uppercase tracking-wider">时间</th>
                                     <th className="px-6 py-3 text-right text-xs font-medium text-slate-400 uppercase tracking-wider">操作</th>
                                 </tr>
@@ -1065,7 +1067,9 @@ export const ConcentrationPanel: React.FC = () => {
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-400 font-mono">
-                                                    {item.meta?.save_type === 'online' ? (item.meta?.order_no || '--') : (item.meta?.concentration || '--')}
+                                                    {item.meta?.save_type === 'online'
+                                                        ? `${item.meta?.order_no || '--'} / ${item.meta?.online_standard || '--'} / ${item.meta?.online_concentration || '--'}`
+                                                        : (item.meta?.concentration || '--')}
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 font-mono">
                                                     {item.timestamp}

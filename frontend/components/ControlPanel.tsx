@@ -1,10 +1,19 @@
-import React, { useState } from 'react';
-import { ProcessingParams } from '../types';
+import React, { useEffect, useState } from 'react';
+import { HistoryItem, ProcessingParams } from '../types';
 import { BoltIcon, FolderArrowDownIcon } from '@heroicons/react/24/outline';
+import { fetchHistoryList } from '../services/api';
 
 interface ControlPanelProps {
   onProcess: (files: { sample: File; water: File; dark: File }, params: ProcessingParams) => void;
-  onSave: (name: string, type: 'standard' | 'multicomponent' | 'online', concentration?: string, dyeCode?: string, orderNo?: string) => void;
+  onSave: (
+    name: string,
+    type: 'standard' | 'multicomponent' | 'online',
+    concentration?: string,
+    dyeCode?: string,
+    orderNo?: string,
+    onlineStandard?: string,
+    onlineConcentration?: string
+  ) => void;
   loading: boolean;
   hasData: boolean;
 }
@@ -30,6 +39,21 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
   const [concentration, setConcentration] = useState('');
   const [dyeCode, setDyeCode] = useState('');
   const [orderNo, setOrderNo] = useState('');
+  const [onlineConcentration, setOnlineConcentration] = useState('');
+  const [onlineStandard, setOnlineStandard] = useState('');
+  const [standardItems, setStandardItems] = useState<HistoryItem[]>([]);
+
+  useEffect(() => {
+    const loadStandards = async () => {
+      try {
+        const list = await fetchHistoryList();
+        setStandardItems(list.filter((item) => item.meta?.save_type === 'standard'));
+      } catch (e) {
+        console.error('加载标准品列表失败');
+      }
+    };
+    loadStandards();
+  }, []);
 
   const handleFileChange = (key: keyof typeof files) => (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -230,15 +254,42 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
              )}
 
             {saveType === 'online' && (
-                <div className="animate-fade-in">
-                  <label className="block text-xs font-medium text-slate-500 mb-1">订单号 (Order No.)</label>
-                  <input
-                      type="text"
-                      placeholder="例如: ORD-20260413-001"
-                      value={orderNo}
-                      onChange={(e) => setOrderNo(e.target.value)}
+                <div className="animate-fade-in space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">标准数据染料 (Standard)</label>
+                    <select
+                      value={onlineStandard}
+                      onChange={(e) => setOnlineStandard(e.target.value)}
                       className="w-full bg-slate-800 border-slate-700 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm text-slate-200"
-                  />
+                    >
+                      <option value="">请选择标准数据染料</option>
+                      {standardItems.map((item) => (
+                        <option key={item.filename} value={item.filename}>
+                          {item.name || item.filename}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">浓度 (Concentration)</label>
+                    <input
+                        type="text"
+                        placeholder="例如: 0.8 g/L"
+                        value={onlineConcentration}
+                        onChange={(e) => setOnlineConcentration(e.target.value)}
+                        className="w-full bg-slate-800 border-slate-700 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm text-slate-200"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">订单号 (Order No.)</label>
+                    <input
+                        type="text"
+                        placeholder="例如: ORD-20260413-001"
+                        value={orderNo}
+                        onChange={(e) => setOrderNo(e.target.value)}
+                        className="w-full bg-slate-800 border-slate-700 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm text-slate-200"
+                    />
+                  </div>
                 </div>
              )}
            </div>
@@ -252,8 +303,12 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
                 className="flex-1 bg-slate-800 border-slate-700 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500 text-slate-200"
              />
              <button
-                onClick={() => onSave(saveName, saveType, concentration, dyeCode, orderNo)}
-                disabled={!saveName || (saveType === 'standard' && !concentration) || (saveType === 'online' && !orderNo)}
+                onClick={() => onSave(saveName, saveType, concentration, dyeCode, orderNo, onlineStandard, onlineConcentration)}
+                disabled={
+                  !saveName ||
+                  (saveType === 'standard' && !concentration) ||
+                  (saveType === 'online' && (!orderNo || !onlineStandard || !onlineConcentration))
+                }
                 className="px-3 py-2 bg-emerald-700 text-white rounded-md hover:bg-emerald-600 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed flex items-center shadow-sm border border-emerald-600 disabled:border-slate-700"
              >
                 <FolderArrowDownIcon className="w-5 h-5" />
