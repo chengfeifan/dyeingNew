@@ -14,6 +14,8 @@ export interface ProcessedData {
     concentration?: string;
     dye_code?: string;
     order_no?: string;
+    online_standard?: string;
+    online_concentration?: string;
     [key: string]: any;
   };
   data: {
@@ -41,6 +43,8 @@ export interface HistoryItem {
       concentration?: string;
       dye_code?: string;
       order_no?: string;
+      online_standard?: string;
+      online_concentration?: string;
       [key: string]: any;
   }
 }

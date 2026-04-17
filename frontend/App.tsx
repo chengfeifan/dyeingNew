@@ -126,11 +126,13 @@ const App: React.FC = () => {
     type: 'standard' | 'multicomponent' | 'online',
     concentration?: string,
     dyeCode?: string,
-    orderNo?: string
+    orderNo?: string,
+    onlineStandard?: string,
+    onlineConcentration?: string
   ) => {
     if (!data) return;
     try {
-      await saveHistory(name, data, type, concentration, dyeCode, orderNo);
+      await saveHistory(name, data, type, concentration, dyeCode, orderNo, onlineStandard, onlineConcentration);
       alert("保存成功！");
       loadHistory();
     } catch (err) {

@@ -100,7 +100,9 @@ export const saveHistory = async (
   saveType: 'standard' | 'multicomponent' | 'online',
   concentration?: string,
   dyeCode?: string,
-  orderNo?: string
+  orderNo?: string,
+  onlineStandard?: string,
+  onlineConcentration?: string
 ): Promise<void> => {
   try {
     await api.post('/save', {
@@ -113,6 +115,8 @@ export const saveHistory = async (
         concentration: concentration ?? data.meta.concentration,
         dye_code: dyeCode ?? data.meta.dye_code,
         order_no: orderNo ?? data.meta.order_no,
+        online_standard: onlineStandard ?? data.meta.online_standard,
+        online_concentration: onlineConcentration ?? data.meta.online_concentration,
       },
     });
   } catch (error) {
