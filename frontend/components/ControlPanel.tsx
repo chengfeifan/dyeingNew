@@ -18,6 +18,11 @@ interface ControlPanelProps {
   hasData: boolean;
 }
 
+type OnlineDyeRow = {
+  standardFilename: string;
+  concentration: string;
+};
+
 export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, loading, hasData }) => {
   const [files, setFiles] = useState<{ sample: File | null; water: File | null; dark: File | null }>({
     sample: null,
@@ -39,8 +44,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
   const [concentration, setConcentration] = useState('');
   const [dyeCode, setDyeCode] = useState('');
   const [orderNo, setOrderNo] = useState('');
-  const [onlineConcentration, setOnlineConcentration] = useState('');
-  const [onlineStandard, setOnlineStandard] = useState('');
+  const [onlineRows, setOnlineRows] = useState<OnlineDyeRow[]>([{ standardFilename: '', concentration: '' }]);
   const [standardItems, setStandardItems] = useState<HistoryItem[]>([]);
 
   useEffect(() => {
@@ -70,6 +74,31 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
   };
 
   const isReady = files.sample && files.water && files.dark;
+  const updateOnlineRow = (index: number, key: keyof OnlineDyeRow, value: string) => {
+    setOnlineRows((prev) => prev.map((row, i) => (i === index ? { ...row, [key]: value } : row)));
+  };
+
+  const addOnlineRow = () => {
+    setOnlineRows((prev) => [...prev, { standardFilename: '', concentration: '' }]);
+  };
+
+  const removeOnlineRow = (index: number) => {
+    setOnlineRows((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
+  };
+
+  const validOnlineRows = onlineRows
+    .map((row) => ({
+      standardFilename: row.standardFilename.trim(),
+      concentration: row.concentration.trim(),
+    }))
+    .filter((row) => row.standardFilename && row.concentration);
+
+  const onlineStandardText = validOnlineRows.map((row) => row.standardFilename).join(' + ');
+  const onlineConcentrationText = validOnlineRows.map((row) => row.concentration).join(' + ');
+
+  const isSaveDisabled = !saveName
+    || (saveType === 'standard' && !concentration)
+    || (saveType === 'online' && (!orderNo || !validOnlineRows.length));
 
   return (
     <div className="bg-slate-900 rounded-lg shadow-sm border border-slate-800 p-5 space-y-6 text-slate-300">
@@ -221,7 +250,12 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
                         name="saveType"
                         value="online"
                         checked={saveType === 'online'}
-                        onChange={() => setSaveType('online')}
+                        onChange={() => {
+                          setSaveType('online');
+                          if (!onlineRows.length) {
+                            setOnlineRows([{ standardFilename: '', concentration: '' }]);
+                          }
+                        }}
                         className="bg-slate-800 border-slate-600 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-slate-900"
                     />
                     <span className="text-sm text-slate-300">在线数据 (Online)</span>
@@ -255,30 +289,42 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
 
             {saveType === 'online' && (
                 <div className="animate-fade-in space-y-3">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">标准数据染料 (Standard)</label>
-                    <select
-                      value={onlineStandard}
-                      onChange={(e) => setOnlineStandard(e.target.value)}
-                      className="w-full bg-slate-800 border-slate-700 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm text-slate-200"
+                  <div className="space-y-2">
+                    <label className="block text-xs font-medium text-slate-500">在线染料数据 (可多组)</label>
+                    {onlineRows.map((row, idx) => (
+                      <div key={`online-row-${idx}`} className="grid grid-cols-12 gap-2 items-center">
+                        <select
+                          value={row.standardFilename}
+                          onChange={(e) => updateOnlineRow(idx, 'standardFilename', e.target.value)}
+                          className="col-span-7 bg-slate-800 border-slate-700 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm text-slate-200"
+                        >
+                          <option value="">选择标准数据染料</option>
+                          {standardItems.map((item) => (
+                            <option key={item.filename} value={item.filename}>
+                              {item.name || item.filename}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          value={row.concentration}
+                          onChange={(e) => updateOnlineRow(idx, 'concentration', e.target.value)}
+                          placeholder="浓度，如 0.8 g/L"
+                          className="col-span-3 bg-slate-800 border-slate-700 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm text-slate-200"
+                        />
+                        <button
+                          onClick={() => removeOnlineRow(idx)}
+                          className="col-span-2 text-xs px-2 py-1 bg-slate-800 rounded border border-slate-700 hover:bg-slate-700"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      onClick={addOnlineRow}
+                      className="px-3 py-1.5 text-xs bg-slate-800 rounded border border-slate-700 hover:bg-slate-700"
                     >
-                      <option value="">请选择标准数据染料</option>
-                      {standardItems.map((item) => (
-                        <option key={item.filename} value={item.filename}>
-                          {item.name || item.filename}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-500 mb-1">浓度 (Concentration)</label>
-                    <input
-                        type="text"
-                        placeholder="例如: 0.8 g/L"
-                        value={onlineConcentration}
-                        onChange={(e) => setOnlineConcentration(e.target.value)}
-                        className="w-full bg-slate-800 border-slate-700 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm text-slate-200"
-                    />
+                      + 添加染料
+                    </button>
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-500 mb-1">订单号 (Order No.)</label>
@@ -303,12 +349,16 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
                 className="flex-1 bg-slate-800 border-slate-700 rounded-md text-sm focus:ring-indigo-500 focus:border-indigo-500 text-slate-200"
              />
              <button
-                onClick={() => onSave(saveName, saveType, concentration, dyeCode, orderNo, onlineStandard, onlineConcentration)}
-                disabled={
-                  !saveName ||
-                  (saveType === 'standard' && !concentration) ||
-                  (saveType === 'online' && (!orderNo || !onlineStandard || !onlineConcentration))
-                }
+                onClick={() => onSave(
+                  saveName,
+                  saveType,
+                  concentration,
+                  dyeCode,
+                  orderNo,
+                  saveType === 'online' ? onlineStandardText : '',
+                  saveType === 'online' ? onlineConcentrationText : ''
+                )}
+                disabled={isSaveDisabled}
                 className="px-3 py-2 bg-emerald-700 text-white rounded-md hover:bg-emerald-600 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed flex items-center shadow-sm border border-emerald-600 disabled:border-slate-700"
              >
                 <FolderArrowDownIcon className="w-5 h-5" />
