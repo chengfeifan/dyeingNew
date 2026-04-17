@@ -4,6 +4,7 @@ import { fetchHistoryItem, fetchHistoryList } from '../services/api';
 import { HistoryItem } from '../types';
 
 type SynthesisRow = { filename: string; concentration: string };
+type SimilarityRow = { name: string; rmse: number; similarity: number };
 
 const applyRange = (
   wavelength: number[],
@@ -190,6 +191,26 @@ export const SpectrumSynthesisPanel: React.FC = () => {
     });
   }, [synthesisResult, compareSeries]);
 
+  const similarityResults = useMemo<SimilarityRow[]>(() => {
+    if (!synthesisResult || !compareSeries.length) return [];
+    const synthesisAbsorbance = synthesisResult.absorbance;
+    return compareSeries.map((series) => {
+      const pairedLength = Math.min(synthesisAbsorbance.length, series.absorbance.length);
+      if (!pairedLength) return { name: series.name, rmse: Number.POSITIVE_INFINITY, similarity: 0 };
+      let squaredError = 0;
+      for (let i = 0; i < pairedLength; i += 1) {
+        const delta = synthesisAbsorbance[i] - series.absorbance[i];
+        squaredError += delta * delta;
+      }
+      const rmse = Math.sqrt(squaredError / pairedLength);
+      return {
+        name: series.name,
+        rmse,
+        similarity: 1 / (1 + rmse),
+      };
+    }).sort((a, b) => b.similarity - a.similarity);
+  }, [synthesisResult, compareSeries]);
+
   const toggleOnlineCurve = (filename: string) => {
     setSelectedOnlineCurves((prev) => (
       prev.includes(filename) ? prev.filter((item) => item !== filename) : [...prev, filename]
@@ -200,10 +221,10 @@ export const SpectrumSynthesisPanel: React.FC = () => {
     <div className="max-w-7xl mx-auto h-full grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[420px] text-slate-300">
       <aside className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-lg p-4 space-y-4">
         <h2 className="text-lg font-semibold text-slate-100">光谱合成分析</h2>
-        <p className="text-xs text-slate-500">从标准库选择染料并输入浓度，按非负标准向量权重合成光谱：A_mix=Σ(wᵢ·Aᵢ)。</p>
+        <p className="text-xs text-slate-500">从标准染料库选择染料并输入浓度（g/L），在输入窗口内执行光谱合成，并对比在线数据相似度。</p>
 
         <div className="flex flex-wrap items-center gap-3">
-          <label className="text-sm text-slate-400">分析波段 (nm)</label>
+          <label className="text-sm text-slate-400">输入窗口 (nm)</label>
           <input
             type="number"
             value={rangeMinNm}
@@ -237,7 +258,7 @@ export const SpectrumSynthesisPanel: React.FC = () => {
               <input
                 value={row.concentration}
                 onChange={(e) => updateSynthesisRow(idx, 'concentration', e.target.value)}
-                placeholder="浓度"
+                placeholder="g/L"
                 className="col-span-3 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200"
               />
               <button
@@ -273,6 +294,20 @@ export const SpectrumSynthesisPanel: React.FC = () => {
             {!onlineItems.length && <p className="text-xs text-slate-600">暂无在线数据库染料曲线</p>}
           </div>
         </div>
+
+        {similarityResults.length ? (
+          <div className="border-t border-slate-800 pt-3 space-y-2">
+            <p className="text-xs text-emerald-300">相似染料推荐（输入窗口内）</p>
+            {similarityResults.slice(0, 5).map((item, idx) => (
+              <div key={item.name} className="text-xs text-slate-400 flex justify-between gap-2">
+                <span className="truncate">
+                  {idx === 0 ? '⭐ ' : ''}{item.name}
+                </span>
+                <span>相似度 {(item.similarity * 100).toFixed(2)}%</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
 
         {synthesisResult?.components?.length ? (
           <div className="border-t border-slate-800 pt-3 space-y-1">
