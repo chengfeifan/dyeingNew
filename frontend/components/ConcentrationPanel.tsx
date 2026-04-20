@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { HistoryItem, ConcentrationResult, ConcentrationMethodResult, ProcessedData } from '../types';
 import { fetchHistoryList, analyzeConcentration, analyzeConcentrationMethods, fetchHistoryItem, updateHistoryItem, deleteHistoryItem, reprocessHistorySpectrum } from '../services/api';
-import { BeakerIcon, PlayIcon, BookOpenIcon, TrashIcon, CheckIcon, XMarkIcon, PencilSquareIcon, DocumentTextIcon, TableCellsIcon, ArchiveBoxIcon, EyeIcon } from '@heroicons/react/24/outline';
+import { BeakerIcon, PlayIcon, BookOpenIcon, TrashIcon, CheckIcon, XMarkIcon, PencilSquareIcon, DocumentTextIcon, TableCellsIcon, ArchiveBoxIcon, EyeIcon, CircleStackIcon } from '@heroicons/react/24/outline';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { WavelengthColorBand } from './WavelengthColorBand';
 
@@ -58,6 +58,7 @@ export const ConcentrationPanel: React.FC = () => {
     const [viewRangeMin, setViewRangeMin] = useState<string>('380');
     const [viewRangeMax, setViewRangeMax] = useState<string>('780');
     const [viewSeriesKey, setViewSeriesKey] = useState<'I_corr' | 'T' | 'A'>('A');
+    const [onlineConcentrationItem, setOnlineConcentrationItem] = useState<HistoryItem | null>(null);
     const [librarySearch, setLibrarySearch] = useState<string>('');
     const [libraryConcentrationFilter, setLibraryConcentrationFilter] = useState<'all' | 'with' | 'without'>('all');
 
@@ -433,6 +434,21 @@ export const ConcentrationPanel: React.FC = () => {
                 return true;
             });
     }, [viewRangeMax, viewRangeMin, viewingItemData]);
+
+    const parsedOnlineConcentrations = useMemo(() => {
+        if (!onlineConcentrationItem) return [];
+        const standards = (onlineConcentrationItem.meta?.online_standard || '')
+            .split('+')
+            .map((item) => item.trim())
+            .filter(Boolean);
+        const concentrations = (onlineConcentrationItem.meta?.online_concentration || '')
+            .split('+')
+            .map((item) => item.trim());
+        return standards.map((name, idx) => ({
+            dye: name,
+            concentration: concentrations[idx] || '--',
+        }));
+    }, [onlineConcentrationItem]);
 
     return (
         <div className="max-w-7xl mx-auto flex flex-col h-full gap-4 text-slate-300">
@@ -977,14 +993,20 @@ export const ConcentrationPanel: React.FC = () => {
                                                     />
                                                     <div className="mt-2 space-y-2">
                                                         <div className="text-xs text-slate-500">可选：重新上传光谱并重算</div>
-                                                        {(['sample', 'water', 'dark'] as const).map((key) => (
-                                                            <input
-                                                                key={key}
-                                                                type="file"
-                                                                accept=".spc"
-                                                                onChange={(e) => setEditFiles((prev) => ({ ...prev, [key]: e.target.files?.[0] || null }))}
-                                                                className="block w-full text-xs text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:bg-slate-800 file:text-indigo-400 bg-slate-950/50 rounded-md border border-slate-700"
-                                                            />
+                                                        {([
+                                                            { key: 'sample', label: '样本光谱 (Sample)' },
+                                                            { key: 'water', label: '水光谱 (Water)' },
+                                                            { key: 'dark', label: '暗光谱 (Dark)' },
+                                                        ] as const).map(({ key, label }) => (
+                                                            <div key={key}>
+                                                                <label className="block text-[11px] text-slate-500 mb-1">{label}</label>
+                                                                <input
+                                                                    type="file"
+                                                                    accept=".spc,.csv,.txt"
+                                                                    onChange={(e) => setEditFiles((prev) => ({ ...prev, [key]: e.target.files?.[0] || null }))}
+                                                                    className="block w-full text-xs text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:bg-slate-800 file:text-indigo-400 bg-slate-950/50 rounded-md border border-slate-700"
+                                                                />
+                                                            </div>
                                                         ))}
                                                         <div className="grid grid-cols-2 gap-2">
                                                             <input
@@ -1083,6 +1105,15 @@ export const ConcentrationPanel: React.FC = () => {
                                                         >
                                                             <PencilSquareIcon className="w-5 h-5" />
                                                         </button>
+                                                        {activeTab === 'online-library' && item.meta?.save_type === 'online' && (
+                                                            <button
+                                                                onClick={() => setOnlineConcentrationItem(item)}
+                                                                className="text-cyan-300 hover:text-cyan-200"
+                                                                title="查看浓度"
+                                                            >
+                                                                <CircleStackIcon className="w-5 h-5" />
+                                                            </button>
+                                                        )}
                                                         <button
                                                             onClick={() => handleView(item.filename)}
                                                             className="text-slate-300 hover:text-indigo-300"
@@ -1218,6 +1249,49 @@ export const ConcentrationPanel: React.FC = () => {
                                 </div>
                             </div>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {onlineConcentrationItem && (
+                <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-6">
+                    <div className="w-full max-w-xl bg-slate-900 border border-slate-700 rounded-lg shadow-xl">
+                        <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+                            <div>
+                                <h4 className="text-base font-semibold text-slate-100">在线染料浓度</h4>
+                                <p className="text-xs text-slate-500 mt-1">
+                                    {onlineConcentrationItem.name || onlineConcentrationItem.filename}
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => setOnlineConcentrationItem(null)}
+                                className="text-slate-400 hover:text-slate-200"
+                            >
+                                <XMarkIcon className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="p-5">
+                            {parsedOnlineConcentrations.length ? (
+                                <table className="min-w-full divide-y divide-slate-800">
+                                    <thead className="bg-slate-950">
+                                        <tr>
+                                            <th className="px-3 py-2 text-left text-xs text-slate-400 uppercase">染料种类</th>
+                                            <th className="px-3 py-2 text-right text-xs text-slate-400 uppercase">浓度</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-800">
+                                        {parsedOnlineConcentrations.map((entry, idx) => (
+                                            <tr key={`${entry.dye}-${idx}`}>
+                                                <td className="px-3 py-2 text-sm text-slate-200">{entry.dye}</td>
+                                                <td className="px-3 py-2 text-sm text-right text-cyan-300 font-mono">{entry.concentration}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            ) : (
+                                <p className="text-sm text-slate-500">该在线记录暂无浓度信息。</p>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}
