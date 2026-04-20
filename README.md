@@ -40,6 +40,31 @@
   - HTTPS: https://localhost/ （如使用自签证书需信任后访问）  
   - 健康检查: https://localhost/health
 
+
+## 数据库备份（SQLite）
+
+已提供备份脚本 `./run_backup.sh`，默认配置如下：
+
+- `BACKUP_DIR="/var/backups/sqlite"`（备份目录）
+- `KEEP_DAYS=14`（仅保留最近 14 天）
+- `NAME="appdb"`（备份文件前缀）
+
+脚本会自动备份 `history.db`（默认 `${HISTORY_DIR:-./spectra_history}/history.db`），并清理过期备份。
+
+```bash
+# 执行一次备份
+./run_backup.sh
+
+# 指定数据库路径
+DB_FILE=/app/spectra_history/history.db ./run_backup.sh
+```
+
+可选：通过 crontab 每天定时执行（例如凌晨 3 点）：
+
+```bash
+0 3 * * * /path/to/repo/run_backup.sh >> /var/log/sqlite_backup.log 2>&1
+```
+
 ## 接口概览
 
 - `GET /health`：存活探针。
