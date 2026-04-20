@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { HistoryItem, ProcessingParams } from '../types';
 import { BoltIcon, FolderArrowDownIcon } from '@heroicons/react/24/outline';
 import { fetchHistoryList } from '../services/api';
@@ -21,6 +21,7 @@ interface ControlPanelProps {
 type OnlineDyeRow = {
   standardFilename: string;
   concentration: string;
+  searchKeyword: string;
 };
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, loading, hasData }) => {
@@ -44,7 +45,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
   const [concentration, setConcentration] = useState('');
   const [dyeCode, setDyeCode] = useState('');
   const [orderNo, setOrderNo] = useState('');
-  const [onlineRows, setOnlineRows] = useState<OnlineDyeRow[]>([{ standardFilename: '', concentration: '' }]);
+  const [onlineRows, setOnlineRows] = useState<OnlineDyeRow[]>([{ standardFilename: '', concentration: '', searchKeyword: '' }]);
   const [standardItems, setStandardItems] = useState<HistoryItem[]>([]);
 
   useEffect(() => {
@@ -79,7 +80,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
   };
 
   const addOnlineRow = () => {
-    setOnlineRows((prev) => [...prev, { standardFilename: '', concentration: '' }]);
+    setOnlineRows((prev) => [...prev, { standardFilename: '', concentration: '', searchKeyword: '' }]);
   };
 
   const removeOnlineRow = (index: number) => {
@@ -95,6 +96,9 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
 
   const onlineStandardText = validOnlineRows.map((row) => row.standardFilename).join(' + ');
   const onlineConcentrationText = validOnlineRows.map((row) => row.concentration).join(' + ');
+  const standardLookup = useMemo(() => {
+    return new Map(standardItems.map((item) => [item.filename, item.name || item.filename]));
+  }, [standardItems]);
 
   const isSaveDisabled = !saveName
     || (saveType === 'standard' && !concentration)
@@ -253,7 +257,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
                         onChange={() => {
                           setSaveType('online');
                           if (!onlineRows.length) {
-                            setOnlineRows([{ standardFilename: '', concentration: '' }]);
+                            setOnlineRows([{ standardFilename: '', concentration: '', searchKeyword: '' }]);
                           }
                         }}
                         className="bg-slate-800 border-slate-600 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-slate-900"
@@ -293,18 +297,40 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
                     <label className="block text-xs font-medium text-slate-500">在线染料数据 (可多组)</label>
                     {onlineRows.map((row, idx) => (
                       <div key={`online-row-${idx}`} className="grid grid-cols-12 gap-2 items-center">
-                        <select
-                          value={row.standardFilename}
-                          onChange={(e) => updateOnlineRow(idx, 'standardFilename', e.target.value)}
-                          className="col-span-7 bg-slate-800 border-slate-700 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm text-slate-200"
-                        >
-                          <option value="">选择标准数据染料</option>
-                          {standardItems.map((item) => (
-                            <option key={item.filename} value={item.filename}>
-                              {item.name || item.filename}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="col-span-7 space-y-1">
+                          <input
+                            value={row.searchKeyword}
+                            onChange={(e) => updateOnlineRow(idx, 'searchKeyword', e.target.value)}
+                            placeholder="搜索染料名称/文件名"
+                            className="w-full bg-slate-950/60 border border-slate-700 rounded-md px-2 py-1 text-xs text-slate-300"
+                          />
+                          <select
+                            value={row.standardFilename}
+                            onChange={(e) => setOnlineRows((prev) => prev.map((current, currentIdx) => {
+                              if (currentIdx !== idx) return current;
+                              return {
+                                ...current,
+                                standardFilename: e.target.value,
+                                searchKeyword: e.target.value ? (standardLookup.get(e.target.value) || '') : current.searchKeyword,
+                              };
+                            }))}
+                            className="w-full bg-slate-800 border-slate-700 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm text-slate-200"
+                          >
+                            <option value="">选择标准数据染料</option>
+                            {standardItems
+                              .filter((item) => {
+                                const keyword = row.searchKeyword.trim().toLowerCase();
+                                if (!keyword) return true;
+                                const name = item.name || '';
+                                return [name, item.filename].some((value) => value.toLowerCase().includes(keyword));
+                              })
+                              .map((item) => (
+                                <option key={item.filename} value={item.filename}>
+                                  {item.name || item.filename}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
                         <input
                           value={row.concentration}
                           onChange={(e) => updateOnlineRow(idx, 'concentration', e.target.value)}
