@@ -108,6 +108,20 @@ const buildRecipeTooltipText = (item: ProcessedData): string => {
     .join('；');
 };
 
+const buildOnlineCurveHoverText = (item: HistoryItem): string => {
+  const standardTokens = (item.meta?.online_standard || '')
+    .split('+')
+    .map((token) => token.trim())
+    .filter(Boolean);
+  const concentrationTokens = (item.meta?.online_concentration || '')
+    .split('+')
+    .map((token) => token.trim());
+  if (!standardTokens.length) return '无染料/浓度信息';
+  return standardTokens
+    .map((dyeName, idx) => `${dyeName}\t${concentrationTokens[idx] || '-'}`)
+    .join('\n');
+};
+
 const formatTick = (value: number | string): string => {
   const num = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(num) ? num.toFixed(2) : `${value}`;
@@ -385,7 +399,11 @@ export const SpectrumSynthesisPanel: React.FC = () => {
           <p className="text-sm text-slate-300 mb-2">在线数据库曲线对比</p>
           <div className="max-h-40 overflow-auto space-y-1">
             {onlineCurveOptions.map((item) => (
-              <label key={`online-curve-${item.id}`} className="flex items-center gap-2 text-sm text-slate-400">
+              <label
+                key={`online-curve-${item.id}`}
+                className="flex items-center gap-2 text-sm text-slate-400"
+                title={buildOnlineCurveHoverText(item.item)}
+              >
                 <input
                   type="checkbox"
                   checked={selectedOnlineCurveIds.includes(item.id)}
