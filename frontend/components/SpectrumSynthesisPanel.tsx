@@ -6,6 +6,7 @@ import { HistoryItem } from '../types';
 type SynthesisRow = { filename: string; concentration: string };
 type SimilarityRow = { name: string; rmse: number; similarity: number };
 type ParsedOnlineRecipe = { rows: SynthesisRow[]; sourceName: string };
+type OnlineCurveOption = { id: string; filename: string; name: string };
 
 type ResolvedSynthesisRow = SynthesisRow & { concentrationNum: number };
 
@@ -113,6 +114,16 @@ export const SpectrumSynthesisPanel: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [autoFilledSourceName, setAutoFilledSourceName] = useState<string | null>(null);
+
+  const onlineCurveOptions = useMemo<OnlineCurveOption[]>(() => (
+    onlineItems
+      .filter((item) => Boolean(item.filename))
+      .map((item, index) => ({
+        id: `${item.filename}__${index}`,
+        filename: item.filename,
+        name: item.name || item.filename,
+      }))
+  ), [onlineItems]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -343,8 +354,8 @@ export const SpectrumSynthesisPanel: React.FC = () => {
         <div className="border-t border-slate-800 pt-3">
           <p className="text-sm text-slate-300 mb-2">在线数据库曲线对比</p>
           <div className="max-h-40 overflow-auto space-y-1">
-            {onlineItems.map((item) => (
-              <label key={`online-curve-${item.filename}`} className="flex items-center gap-2 text-sm text-slate-400">
+            {onlineCurveOptions.map((item) => (
+              <label key={`online-curve-${item.id}`} className="flex items-center gap-2 text-sm text-slate-400">
                 <input
                   type="checkbox"
                   checked={selectedOnlineCurves.includes(item.filename)}
@@ -354,7 +365,7 @@ export const SpectrumSynthesisPanel: React.FC = () => {
                 <span className="truncate">{item.name}</span>
               </label>
             ))}
-            {!onlineItems.length && <p className="text-xs text-slate-600">暂无在线数据库染料曲线</p>}
+            {!onlineCurveOptions.length && <p className="text-xs text-slate-600">暂无在线数据库染料曲线</p>}
           </div>
           <p className="text-[11px] text-slate-500 mt-2">
             勾选在线曲线后，点击“执行合成”将自动带入对应在线记录中的染料配方与浓度。
