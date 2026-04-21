@@ -7,6 +7,8 @@ type SynthesisRow = { filename: string; concentration: string };
 type SimilarityRow = { name: string; rmse: number; similarity: number };
 type ParsedOnlineRecipe = { rows: SynthesisRow[]; sourceName: string };
 
+type ResolvedSynthesisRow = SynthesisRow & { concentrationNum: number };
+
 const applyRange = (
   wavelength: number[],
   absorbance: number[],
@@ -53,19 +55,41 @@ const parseFirstNumber = (raw: string | undefined): number | null => {
   return Number.isFinite(num) ? num : null;
 };
 
-const parseOnlineRecipeRows = (item: HistoryItem): SynthesisRow[] => {
+const parseOnlineRecipeRows = (
+  item: HistoryItem,
+  standardItems: HistoryItem[]
+): ResolvedSynthesisRow[] => {
   const standardTokens = (item.meta?.online_standard || '')
     .split('+')
     .map((token) => token.trim())
     .filter(Boolean);
   const concentrationTokens = (item.meta?.online_concentration || '')
     .split('+')
-    .map((token) => token.trim())
-    .filter(Boolean);
+    .map((token) => token.trim());
   if (!standardTokens.length || !concentrationTokens.length) return [];
+
+  const standardLookup = new Map<string, string>();
+  standardItems.forEach((standard) => {
+    if (standard.filename) standardLookup.set(standard.filename, standard.filename);
+    const standardName = (standard.name || '').trim();
+    if (standardName) standardLookup.set(standardName, standard.filename);
+  });
+
   return standardTokens
-    .map((filename, idx) => ({ filename, concentration: concentrationTokens[idx] || '' }))
-    .filter((row) => row.filename && Number.isFinite(Number(row.concentration)) && Number(row.concentration) > 0);
+    .map((standardRef, idx) => {
+      const concentrationRaw = concentrationTokens[idx] || '';
+      const concentrationNum = parseFirstNumber(concentrationRaw);
+      return {
+        filename: standardLookup.get(standardRef) || standardRef,
+        concentration: concentrationNum === null ? concentrationRaw : String(concentrationNum),
+        concentrationNum,
+      };
+    })
+    .filter((row): row is ResolvedSynthesisRow => (
+      Boolean(row.filename)
+      && row.concentrationNum !== null
+      && row.concentrationNum > 0
+    ));
 };
 
 const formatTick = (value: number | string): string => {
@@ -124,22 +148,22 @@ export const SpectrumSynthesisPanel: React.FC = () => {
           .map((filename) => onlineItems.find((item) => item.filename === filename))
           .find((item): item is HistoryItem => Boolean(item));
         if (selectedCurve) {
-          const recipeRows = parseOnlineRecipeRows(selectedCurve);
+          const recipeRows = parseOnlineRecipeRows(selectedCurve, standardItems);
           if (recipeRows.length) {
             rowsForSynthesis = recipeRows;
             parsedOnlineRecipe = {
-              rows: recipeRows,
+              rows: recipeRows.map(({ filename, concentration }) => ({ filename, concentration })),
               sourceName: selectedCurve.name || selectedCurve.filename,
             };
-            setSynthesisRows(recipeRows);
+            setSynthesisRows(recipeRows.map(({ filename, concentration }) => ({ filename, concentration })));
             setAutoFilledSourceName(selectedCurve.name || selectedCurve.filename);
           }
         }
       }
 
       const validRows = rowsForSynthesis
-        .map((row) => ({ ...row, concentrationNum: Number(row.concentration) }))
-        .filter((row) => row.filename && Number.isFinite(row.concentrationNum) && row.concentrationNum > 0);
+        .map((row) => ({ ...row, concentrationNum: parseFirstNumber(row.concentration) }))
+        .filter((row): row is ResolvedSynthesisRow => row.filename && row.concentrationNum !== null && row.concentrationNum > 0);
       if (!validRows.length) throw new Error('请至少选择一个标准染料并输入有效浓度');
 
       const historyMap = new Map(standardItems.map((item) => [item.filename, item]));
@@ -325,7 +349,6 @@ export const SpectrumSynthesisPanel: React.FC = () => {
                   type="checkbox"
                   checked={selectedOnlineCurves.includes(item.filename)}
                   onChange={() => toggleOnlineCurve(item.filename)}
-                  disabled={!synthesisResult}
                   className="rounded bg-slate-800 border-slate-600 text-cyan-500"
                 />
                 <span className="truncate">{item.name}</span>
