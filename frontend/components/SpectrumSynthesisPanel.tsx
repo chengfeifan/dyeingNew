@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { fetchHistoryItem, fetchHistoryList } from '../services/api';
-import { HistoryItem } from '../types';
+import { HistoryItem, ProcessedData } from '../types';
 
 type SynthesisRow = { filename: string; concentration: string };
 type SimilarityRow = { name: string; rmse: number; similarity: number };
 type ParsedOnlineRecipe = { rows: SynthesisRow[]; sourceName: string };
 type OnlineCurveOption = { id: string; filename: string; name: string };
+type CompareSeries = { name: string; wavelength: number[]; absorbance: number[]; recipeTooltip: string };
 
 type ResolvedSynthesisRow = SynthesisRow & { concentrationNum: number };
 
@@ -93,6 +94,20 @@ const parseOnlineRecipeRows = (
     ));
 };
 
+const buildRecipeTooltipText = (item: ProcessedData): string => {
+  const standardTokens = (item.meta?.online_standard || '')
+    .split('+')
+    .map((token) => token.trim())
+    .filter(Boolean);
+  const concentrationTokens = (item.meta?.online_concentration || '')
+    .split('+')
+    .map((token) => token.trim());
+  if (!standardTokens.length) return '无染料/浓度信息';
+  return standardTokens
+    .map((dyeName, idx) => `${dyeName}: ${concentrationTokens[idx] || '-'}`)
+    .join('；');
+};
+
 const formatTick = (value: number | string): string => {
   const num = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(num) ? num.toFixed(2) : `${value}`;
@@ -110,7 +125,7 @@ export const SpectrumSynthesisPanel: React.FC = () => {
     absorbance: number[];
     components: Array<{ name: string; inputConcentration: number; weight: number }>;
   } | null>(null);
-  const [compareSeries, setCompareSeries] = useState<Array<{ name: string; wavelength: number[]; absorbance: number[] }>>([]);
+  const [compareSeries, setCompareSeries] = useState<CompareSeries[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [autoFilledSourceName, setAutoFilledSourceName] = useState<string | null>(null);
@@ -245,6 +260,7 @@ export const SpectrumSynthesisPanel: React.FC = () => {
             name: onlineName,
             wavelength: synthesisResult.wavelength,
             absorbance: interpolateLinear(ranged.wavelength, ranged.absorbance, synthesisResult.wavelength),
+            recipeTooltip: buildRecipeTooltipText(detail),
           };
         });
         setCompareSeries(series);
@@ -291,6 +307,14 @@ export const SpectrumSynthesisPanel: React.FC = () => {
       prev.includes(filename) ? prev.filter((item) => item !== filename) : [...prev, filename]
     ));
   };
+
+  const legendRecipeMap = useMemo(() => {
+    const next = new Map<string, string>();
+    compareSeries.forEach((series) => {
+      next.set(series.name, `曲线：${series.name}\n${series.recipeTooltip}`);
+    });
+    return next;
+  }, [compareSeries]);
 
   return (
     <div className="max-w-7xl mx-auto h-full grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[420px] text-slate-300">
@@ -415,7 +439,13 @@ export const SpectrumSynthesisPanel: React.FC = () => {
             <XAxis dataKey="wavelength" stroke="#94a3b8" name="wavelength" tickFormatter={(v) => Number(v).toFixed(0)} />
             <YAxis stroke="#94a3b8" tickFormatter={formatTick} />
             <Tooltip />
-            <Legend />
+            <Legend
+              formatter={(value: string) => (
+                <span title={legendRecipeMap.get(value) || `曲线：${value}`}>
+                  {value}
+                </span>
+              )}
+            />
             <Line type="monotone" dataKey="synthesis" stroke="#f43f5e" strokeWidth={2} dot={false} name="合成光谱" />
             {compareSeries.map((series, index) => (
               <Line
