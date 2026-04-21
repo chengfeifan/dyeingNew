@@ -5,6 +5,7 @@ import { HistoryItem } from '../types';
 
 type SynthesisRow = { filename: string; concentration: string };
 type SimilarityRow = { name: string; rmse: number; similarity: number };
+type ParsedOnlineRecipe = { rows: SynthesisRow[]; sourceName: string };
 
 const applyRange = (
   wavelength: number[],
@@ -52,6 +53,21 @@ const parseFirstNumber = (raw: string | undefined): number | null => {
   return Number.isFinite(num) ? num : null;
 };
 
+const parseOnlineRecipeRows = (item: HistoryItem): SynthesisRow[] => {
+  const standardTokens = (item.meta?.online_standard || '')
+    .split('+')
+    .map((token) => token.trim())
+    .filter(Boolean);
+  const concentrationTokens = (item.meta?.online_concentration || '')
+    .split('+')
+    .map((token) => token.trim())
+    .filter(Boolean);
+  if (!standardTokens.length || !concentrationTokens.length) return [];
+  return standardTokens
+    .map((filename, idx) => ({ filename, concentration: concentrationTokens[idx] || '' }))
+    .filter((row) => row.filename && Number.isFinite(Number(row.concentration)) && Number(row.concentration) > 0);
+};
+
 const formatTick = (value: number | string): string => {
   const num = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(num) ? num.toFixed(2) : `${value}`;
@@ -72,6 +88,7 @@ export const SpectrumSynthesisPanel: React.FC = () => {
   const [compareSeries, setCompareSeries] = useState<Array<{ name: string; wavelength: number[]; absorbance: number[] }>>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [autoFilledSourceName, setAutoFilledSourceName] = useState<string | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
@@ -100,7 +117,27 @@ export const SpectrumSynthesisPanel: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const validRows = synthesisRows
+      let rowsForSynthesis = synthesisRows;
+      let parsedOnlineRecipe: ParsedOnlineRecipe | null = null;
+      if (selectedOnlineCurves.length) {
+        const selectedCurve = selectedOnlineCurves
+          .map((filename) => onlineItems.find((item) => item.filename === filename))
+          .find((item): item is HistoryItem => Boolean(item));
+        if (selectedCurve) {
+          const recipeRows = parseOnlineRecipeRows(selectedCurve);
+          if (recipeRows.length) {
+            rowsForSynthesis = recipeRows;
+            parsedOnlineRecipe = {
+              rows: recipeRows,
+              sourceName: selectedCurve.name || selectedCurve.filename,
+            };
+            setSynthesisRows(recipeRows);
+            setAutoFilledSourceName(selectedCurve.name || selectedCurve.filename);
+          }
+        }
+      }
+
+      const validRows = rowsForSynthesis
         .map((row) => ({ ...row, concentrationNum: Number(row.concentration) }))
         .filter((row) => row.filename && Number.isFinite(row.concentrationNum) && row.concentrationNum > 0);
       if (!validRows.length) throw new Error('请至少选择一个标准染料并输入有效浓度');
@@ -146,6 +183,9 @@ export const SpectrumSynthesisPanel: React.FC = () => {
           weight: item.weight / totalWeight,
         })),
       });
+      if (!parsedOnlineRecipe) {
+        setAutoFilledSourceName(null);
+      }
     } catch (e: any) {
       setError(e?.message || '光谱合成失败');
     } finally {
@@ -293,7 +333,16 @@ export const SpectrumSynthesisPanel: React.FC = () => {
             ))}
             {!onlineItems.length && <p className="text-xs text-slate-600">暂无在线数据库染料曲线</p>}
           </div>
+          <p className="text-[11px] text-slate-500 mt-2">
+            勾选在线曲线后，点击“执行合成”将自动带入对应在线记录中的染料配方与浓度。
+          </p>
         </div>
+
+        {autoFilledSourceName ? (
+          <p className="text-xs text-cyan-300">
+            已按在线曲线「{autoFilledSourceName}」自动填入染料及浓度。
+          </p>
+        ) : null}
 
         {similarityResults.length ? (
           <div className="border-t border-slate-800 pt-3 space-y-2">
