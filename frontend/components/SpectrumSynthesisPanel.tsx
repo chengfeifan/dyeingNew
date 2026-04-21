@@ -6,7 +6,7 @@ import { HistoryItem, ProcessedData } from '../types';
 type SynthesisRow = { filename: string; concentration: string };
 type SimilarityRow = { name: string; rmse: number; similarity: number };
 type ParsedOnlineRecipe = { rows: SynthesisRow[]; sourceName: string };
-type OnlineCurveOption = { id: string; filename: string; name: string };
+type OnlineCurveOption = { id: string; filename: string; name: string; item: HistoryItem };
 type CompareSeries = { name: string; wavelength: number[]; absorbance: number[]; recipeTooltip: string };
 
 type ResolvedSynthesisRow = SynthesisRow & { concentrationNum: number };
@@ -117,7 +117,7 @@ export const SpectrumSynthesisPanel: React.FC = () => {
   const [standardItems, setStandardItems] = useState<HistoryItem[]>([]);
   const [onlineItems, setOnlineItems] = useState<HistoryItem[]>([]);
   const [synthesisRows, setSynthesisRows] = useState<SynthesisRow[]>([{ filename: '', concentration: '' }]);
-  const [selectedOnlineCurves, setSelectedOnlineCurves] = useState<string[]>([]);
+  const [selectedOnlineCurveIds, setSelectedOnlineCurveIds] = useState<string[]>([]);
   const [rangeMinNm, setRangeMinNm] = useState<number>(188);
   const [rangeMaxNm, setRangeMaxNm] = useState<number>(800);
   const [synthesisResult, setSynthesisResult] = useState<{
@@ -137,6 +137,7 @@ export const SpectrumSynthesisPanel: React.FC = () => {
         id: `${item.filename}__${index}`,
         filename: item.filename,
         name: item.name || item.filename,
+        item,
       }))
   ), [onlineItems]);
 
@@ -169,10 +170,11 @@ export const SpectrumSynthesisPanel: React.FC = () => {
     try {
       let rowsForSynthesis = synthesisRows;
       let parsedOnlineRecipe: ParsedOnlineRecipe | null = null;
-      if (selectedOnlineCurves.length) {
-        const selectedCurve = selectedOnlineCurves
-          .map((filename) => onlineItems.find((item) => item.filename === filename))
-          .find((item): item is HistoryItem => Boolean(item));
+      if (selectedOnlineCurveIds.length) {
+        const selectedCurveOption = selectedOnlineCurveIds
+          .map((id) => onlineCurveOptions.find((item) => item.id === id))
+          .find((item): item is OnlineCurveOption => Boolean(item));
+        const selectedCurve = selectedCurveOption?.item;
         if (selectedCurve) {
           const recipeRows = parseOnlineRecipeRows(selectedCurve, standardItems);
           if (recipeRows.length) {
@@ -245,16 +247,20 @@ export const SpectrumSynthesisPanel: React.FC = () => {
 
   useEffect(() => {
     const loadCompareSeries = async () => {
-      if (!selectedOnlineCurves.length || !synthesisResult) {
+      if (!selectedOnlineCurveIds.length || !synthesisResult) {
         setCompareSeries([]);
         return;
       }
       try {
-        const details = await Promise.all(selectedOnlineCurves.map((name) => fetchHistoryItem(name)));
+        const selectedCurveOptions = selectedOnlineCurveIds
+          .map((id) => onlineCurveOptions.find((item) => item.id === id))
+          .filter((item): item is OnlineCurveOption => Boolean(item));
+        const details = await Promise.all(selectedCurveOptions.map((item) => fetchHistoryItem(item.filename)));
         const series = details.map((detail, idx) => {
-          const onlineName = onlineItems.find((item) => item.filename === selectedOnlineCurves[idx])?.name
+          const onlineName = selectedCurveOptions[idx]?.name
             || detail.meta?.name
-            || selectedOnlineCurves[idx];
+            || selectedCurveOptions[idx]?.filename
+            || `在线曲线${idx + 1}`;
           const ranged = applyRange(detail.data.lambda || [], detail.data.A || [], rangeMinNm, rangeMaxNm);
           return {
             name: onlineName,
@@ -269,7 +275,7 @@ export const SpectrumSynthesisPanel: React.FC = () => {
       }
     };
     loadCompareSeries();
-  }, [selectedOnlineCurves, synthesisResult, rangeMinNm, rangeMaxNm, onlineItems]);
+  }, [selectedOnlineCurveIds, synthesisResult, rangeMinNm, rangeMaxNm, onlineCurveOptions]);
 
   const synthesisChartData = useMemo(() => {
     if (!synthesisResult) return [];
@@ -302,9 +308,9 @@ export const SpectrumSynthesisPanel: React.FC = () => {
     }).sort((a, b) => b.similarity - a.similarity);
   }, [synthesisResult, compareSeries]);
 
-  const toggleOnlineCurve = (filename: string) => {
-    setSelectedOnlineCurves((prev) => (
-      prev.includes(filename) ? prev.filter((item) => item !== filename) : [...prev, filename]
+  const toggleOnlineCurve = (id: string) => {
+    setSelectedOnlineCurveIds((prev) => (
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
     ));
   };
 
@@ -382,8 +388,8 @@ export const SpectrumSynthesisPanel: React.FC = () => {
               <label key={`online-curve-${item.id}`} className="flex items-center gap-2 text-sm text-slate-400">
                 <input
                   type="checkbox"
-                  checked={selectedOnlineCurves.includes(item.filename)}
-                  onChange={() => toggleOnlineCurve(item.filename)}
+                  checked={selectedOnlineCurveIds.includes(item.id)}
+                  onChange={() => toggleOnlineCurve(item.id)}
                   className="rounded bg-slate-800 border-slate-600 text-cyan-500"
                 />
                 <span className="truncate">{item.name}</span>
