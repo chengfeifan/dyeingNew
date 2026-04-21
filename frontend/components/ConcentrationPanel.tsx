@@ -437,18 +437,30 @@ export const ConcentrationPanel: React.FC = () => {
 
     const parsedOnlineConcentrations = useMemo(() => {
         if (!onlineConcentrationItem) return [];
-        const standards = (onlineConcentrationItem.meta?.online_standard || '')
+
+        const standardCodeLookup = new Map<string, string>();
+        standards.forEach((item) => {
+            const dyeCode = item.meta?.dye_code?.trim();
+            if (!dyeCode) return;
+            standardCodeLookup.set(item.filename, dyeCode);
+            if (item.name) {
+                standardCodeLookup.set(item.name, dyeCode);
+            }
+        });
+
+        const standardsInRecord = (onlineConcentrationItem.meta?.online_standard || '')
             .split('+')
             .map((item) => item.trim())
             .filter(Boolean);
         const concentrations = (onlineConcentrationItem.meta?.online_concentration || '')
             .split('+')
             .map((item) => item.trim());
-        return standards.map((name, idx) => ({
-            dye: name,
+
+        return standardsInRecord.map((standardRef, idx) => ({
+            dye: standardCodeLookup.get(standardRef) || standardRef,
             concentration: concentrations[idx] || '--',
         }));
-    }, [onlineConcentrationItem]);
+    }, [onlineConcentrationItem, standards]);
 
     return (
         <div className="max-w-7xl mx-auto flex flex-col h-full gap-4 text-slate-300">
@@ -1275,7 +1287,7 @@ export const ConcentrationPanel: React.FC = () => {
                                 <table className="min-w-full divide-y divide-slate-800">
                                     <thead className="bg-slate-950">
                                         <tr>
-                                            <th className="px-3 py-2 text-left text-xs text-slate-400 uppercase">染料种类</th>
+                                            <th className="px-3 py-2 text-left text-xs text-slate-400 uppercase">染料代号</th>
                                             <th className="px-3 py-2 text-right text-xs text-slate-400 uppercase">浓度</th>
                                         </tr>
                                     </thead>
