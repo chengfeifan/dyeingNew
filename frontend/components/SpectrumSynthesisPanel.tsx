@@ -8,6 +8,13 @@ type SimilarityRow = { name: string; rmse: number; similarity: number };
 type ParsedOnlineRecipe = { rows: SynthesisRow[]; sourceName: string };
 type OnlineCurveOption = { id: string; filename: string; name: string; item: HistoryItem };
 type CompareSeries = { name: string; wavelength: number[]; absorbance: number[]; recipeTooltip: string };
+type SynthesisTab = 'manual' | 'online-db';
+type OnlineDbComparison = {
+  curveName: string;
+  synthesis: { wavelength: number[]; absorbance: number[] };
+  online: { wavelength: number[]; absorbance: number[] };
+  recipeTooltip: string;
+};
 
 type ResolvedSynthesisRow = SynthesisRow & { concentrationNum: number };
 
@@ -128,6 +135,7 @@ const formatTick = (value: number | string): string => {
 };
 
 export const SpectrumSynthesisPanel: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<SynthesisTab>('manual');
   const [standardItems, setStandardItems] = useState<HistoryItem[]>([]);
   const [onlineItems, setOnlineItems] = useState<HistoryItem[]>([]);
   const [synthesisRows, setSynthesisRows] = useState<SynthesisRow[]>([{ filename: '', concentration: '' }]);
@@ -140,6 +148,7 @@ export const SpectrumSynthesisPanel: React.FC = () => {
     components: Array<{ name: string; inputConcentration: number; weight: number }>;
   } | null>(null);
   const [compareSeries, setCompareSeries] = useState<CompareSeries[]>([]);
+  const [onlineDbComparisons, setOnlineDbComparisons] = useState<OnlineDbComparison[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [autoFilledSourceName, setAutoFilledSourceName] = useState<string | null>(null);
@@ -178,6 +187,52 @@ export const SpectrumSynthesisPanel: React.FC = () => {
     setSynthesisRows((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
   };
 
+  const synthesizeByRows = async (rows: SynthesisRow[]) => {
+    const validRows = rows
+      .map((row) => ({ ...row, concentrationNum: parseFirstNumber(row.concentration) }))
+      .filter((row): row is ResolvedSynthesisRow => row.filename && row.concentrationNum !== null && row.concentrationNum > 0);
+    if (!validRows.length) throw new Error('请至少选择一个标准染料并输入有效浓度');
+
+    const historyMap = new Map(standardItems.map((item) => [item.filename, item]));
+    const loaded = await Promise.all(validRows.map(async (row) => {
+      const detail = await fetchHistoryItem(row.filename);
+      const ranged = applyRange(detail.data.lambda || [], detail.data.A || [], rangeMinNm, rangeMaxNm);
+      const refText = historyMap.get(row.filename)?.meta?.concentration || detail.meta?.concentration;
+      const refConc = parseFirstNumber(refText) || 1;
+      return {
+        filename: row.filename,
+        name: historyMap.get(row.filename)?.name || detail.meta?.name || row.filename,
+        wavelength: ranged.wavelength,
+        absorbance: ranged.absorbance,
+        inputConcentration: row.concentrationNum,
+        refConc,
+      };
+    }));
+
+    const baseWavelength = loaded[0].wavelength;
+    const normalized = loaded.map((item) => {
+      const interpAbs = item.wavelength.length === baseWavelength.length
+        ? item.absorbance
+        : interpolateLinear(item.wavelength, item.absorbance, baseWavelength);
+      const weight = Math.max(item.inputConcentration / Math.max(item.refConc, 1e-8), 0);
+      return { ...item, absorbance: interpAbs, weight };
+    });
+    const totalWeight = normalized.reduce((sum, item) => sum + item.weight, 0);
+    if (totalWeight <= 0) throw new Error('浓度权重计算失败，请检查标准品浓度设置');
+    const synthesizedAbsorbance = baseWavelength.map((_, idx) => (
+      normalized.reduce((sum, item) => sum + item.weight * item.absorbance[idx], 0)
+    ));
+    return {
+      wavelength: baseWavelength,
+      absorbance: synthesizedAbsorbance,
+      components: normalized.map((item) => ({
+        name: item.name,
+        inputConcentration: item.inputConcentration,
+        weight: item.weight / totalWeight,
+      })),
+    };
+  };
+
   const runNllsSynthesis = async () => {
     setLoading(true);
     setError(null);
@@ -203,52 +258,8 @@ export const SpectrumSynthesisPanel: React.FC = () => {
         }
       }
 
-      const validRows = rowsForSynthesis
-        .map((row) => ({ ...row, concentrationNum: parseFirstNumber(row.concentration) }))
-        .filter((row): row is ResolvedSynthesisRow => row.filename && row.concentrationNum !== null && row.concentrationNum > 0);
-      if (!validRows.length) throw new Error('请至少选择一个标准染料并输入有效浓度');
-
-      const historyMap = new Map(standardItems.map((item) => [item.filename, item]));
-      const loaded = await Promise.all(validRows.map(async (row) => {
-        const detail = await fetchHistoryItem(row.filename);
-        const ranged = applyRange(detail.data.lambda || [], detail.data.A || [], rangeMinNm, rangeMaxNm);
-        const refText = historyMap.get(row.filename)?.meta?.concentration || detail.meta?.concentration;
-        const refConc = parseFirstNumber(refText) || 1;
-        return {
-          filename: row.filename,
-          name: historyMap.get(row.filename)?.name || detail.meta?.name || row.filename,
-          wavelength: ranged.wavelength,
-          absorbance: ranged.absorbance,
-          inputConcentration: row.concentrationNum,
-          refConc,
-        };
-      }));
-
-      const baseWavelength = loaded[0].wavelength;
-      const normalized = loaded.map((item) => {
-        const interpAbs = item.wavelength.length === baseWavelength.length
-          ? item.absorbance
-          : interpolateLinear(item.wavelength, item.absorbance, baseWavelength);
-        const weight = Math.max(item.inputConcentration / Math.max(item.refConc, 1e-8), 0);
-        return { ...item, absorbance: interpAbs, weight };
-      });
-
-      const totalWeight = normalized.reduce((sum, item) => sum + item.weight, 0);
-      if (totalWeight <= 0) throw new Error('浓度权重计算失败，请检查标准品浓度设置');
-
-      const synthesizedAbsorbance = baseWavelength.map((_, idx) => (
-        normalized.reduce((sum, item) => sum + item.weight * item.absorbance[idx], 0)
-      ));
-
-      setSynthesisResult({
-        wavelength: baseWavelength,
-        absorbance: synthesizedAbsorbance,
-        components: normalized.map((item) => ({
-          name: item.name,
-          inputConcentration: item.inputConcentration,
-          weight: item.weight / totalWeight,
-        })),
-      });
+      const synthesized = await synthesizeByRows(rowsForSynthesis);
+      setSynthesisResult(synthesized);
       if (!parsedOnlineRecipe) {
         setAutoFilledSourceName(null);
       }
@@ -261,7 +272,7 @@ export const SpectrumSynthesisPanel: React.FC = () => {
 
   useEffect(() => {
     const loadCompareSeries = async () => {
-      if (!selectedOnlineCurveIds.length || !synthesisResult) {
+      if (activeTab !== 'manual' || !selectedOnlineCurveIds.length || !synthesisResult) {
         setCompareSeries([]);
         return;
       }
@@ -289,9 +300,63 @@ export const SpectrumSynthesisPanel: React.FC = () => {
       }
     };
     loadCompareSeries();
-  }, [selectedOnlineCurveIds, synthesisResult, rangeMinNm, rangeMaxNm, onlineCurveOptions]);
+  }, [activeTab, selectedOnlineCurveIds, synthesisResult, rangeMinNm, rangeMaxNm, onlineCurveOptions]);
+
+  useEffect(() => {
+    const runOnlineDbSynthesis = async () => {
+      if (activeTab !== 'online-db' || !selectedOnlineCurveIds.length) {
+        setOnlineDbComparisons([]);
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        const selectedCurveOptions = selectedOnlineCurveIds
+          .map((id) => onlineCurveOptions.find((item) => item.id === id))
+          .filter((item): item is OnlineCurveOption => Boolean(item));
+        const comparisons = await Promise.all(selectedCurveOptions.map(async (option) => {
+          const recipeRows = parseOnlineRecipeRows(option.item, standardItems);
+          if (!recipeRows.length) {
+            throw new Error(`在线曲线「${option.name}」缺少可解析的染料/浓度信息`);
+          }
+          const synthesized = await synthesizeByRows(recipeRows.map(({ filename, concentration }) => ({ filename, concentration })));
+          const onlineDetail = await fetchHistoryItem(option.filename);
+          const ranged = applyRange(onlineDetail.data.lambda || [], onlineDetail.data.A || [], rangeMinNm, rangeMaxNm);
+          return {
+            curveName: option.name,
+            synthesis: {
+              wavelength: synthesized.wavelength,
+              absorbance: synthesized.absorbance,
+            },
+            online: {
+              wavelength: synthesized.wavelength,
+              absorbance: interpolateLinear(ranged.wavelength, ranged.absorbance, synthesized.wavelength),
+            },
+            recipeTooltip: buildRecipeTooltipText(onlineDetail),
+          };
+        }));
+        setOnlineDbComparisons(comparisons);
+      } catch (e: any) {
+        setError(e?.message || '在线数据库曲线分析失败');
+      } finally {
+        setLoading(false);
+      }
+    };
+    runOnlineDbSynthesis();
+  }, [activeTab, selectedOnlineCurveIds, onlineCurveOptions, standardItems, rangeMinNm, rangeMaxNm]);
 
   const synthesisChartData = useMemo(() => {
+    if (activeTab === 'online-db') {
+      if (!onlineDbComparisons.length) return [];
+      return onlineDbComparisons[0].synthesis.wavelength.map((wl, idx) => {
+        const row: Record<string, number> = { wavelength: wl };
+        onlineDbComparisons.forEach((item) => {
+          row[`合成-${item.curveName}`] = item.synthesis.absorbance[idx];
+          row[`在线-${item.curveName}`] = item.online.absorbance[idx];
+        });
+        return row;
+      });
+    }
     if (!synthesisResult) return [];
     return synthesisResult.wavelength.map((wl, idx) => {
       const row: Record<string, number> = { wavelength: wl, synthesis: synthesisResult.absorbance[idx] };
@@ -300,17 +365,29 @@ export const SpectrumSynthesisPanel: React.FC = () => {
       });
       return row;
     });
-  }, [synthesisResult, compareSeries]);
+  }, [activeTab, synthesisResult, compareSeries, onlineDbComparisons]);
 
   const similarityResults = useMemo<SimilarityRow[]>(() => {
+    if (activeTab === 'online-db') {
+      return onlineDbComparisons.map((item) => {
+        const pairedLength = Math.min(item.synthesis.absorbance.length, item.online.absorbance.length);
+        if (!pairedLength) return { name: item.curveName, rmse: Number.POSITIVE_INFINITY, similarity: 0 };
+        let squaredError = 0;
+        for (let i = 0; i < pairedLength; i += 1) {
+          const delta = item.synthesis.absorbance[i] - item.online.absorbance[i];
+          squaredError += delta * delta;
+        }
+        const rmse = Math.sqrt(squaredError / pairedLength);
+        return { name: item.curveName, rmse, similarity: 1 / (1 + rmse) };
+      }).sort((a, b) => b.similarity - a.similarity);
+    }
     if (!synthesisResult || !compareSeries.length) return [];
-    const synthesisAbsorbance = synthesisResult.absorbance;
     return compareSeries.map((series) => {
-      const pairedLength = Math.min(synthesisAbsorbance.length, series.absorbance.length);
+      const pairedLength = Math.min(synthesisResult.absorbance.length, series.absorbance.length);
       if (!pairedLength) return { name: series.name, rmse: Number.POSITIVE_INFINITY, similarity: 0 };
       let squaredError = 0;
       for (let i = 0; i < pairedLength; i += 1) {
-        const delta = synthesisAbsorbance[i] - series.absorbance[i];
+        const delta = synthesisResult.absorbance[i] - series.absorbance[i];
         squaredError += delta * delta;
       }
       const rmse = Math.sqrt(squaredError / pairedLength);
@@ -320,7 +397,7 @@ export const SpectrumSynthesisPanel: React.FC = () => {
         similarity: 1 / (1 + rmse),
       };
     }).sort((a, b) => b.similarity - a.similarity);
-  }, [synthesisResult, compareSeries]);
+  }, [activeTab, synthesisResult, compareSeries, onlineDbComparisons]);
 
   const toggleOnlineCurve = (id: string) => {
     setSelectedOnlineCurveIds((prev) => (
@@ -330,17 +407,50 @@ export const SpectrumSynthesisPanel: React.FC = () => {
 
   const legendRecipeMap = useMemo(() => {
     const next = new Map<string, string>();
-    compareSeries.forEach((series) => {
-      next.set(series.name, `曲线：${series.name}\n${series.recipeTooltip}`);
-    });
+    if (activeTab === 'online-db') {
+      onlineDbComparisons.forEach((item) => {
+        next.set(`合成-${item.curveName}`, `合成：${item.curveName}\n${item.recipeTooltip}`);
+        next.set(`在线-${item.curveName}`, `在线：${item.curveName}\n${item.recipeTooltip}`);
+      });
+    } else {
+      compareSeries.forEach((series) => {
+        next.set(series.name, `曲线：${series.name}\n${series.recipeTooltip}`);
+      });
+    }
     return next;
-  }, [compareSeries]);
+  }, [activeTab, compareSeries, onlineDbComparisons]);
 
   return (
     <div className="max-w-7xl mx-auto h-full grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[420px] text-slate-300">
       <aside className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-lg p-4 space-y-4">
         <h2 className="text-lg font-semibold text-slate-100">光谱合成分析</h2>
-        <p className="text-xs text-slate-500">从标准染料库选择染料并输入浓度（g/L），在输入窗口内执行光谱合成，并对比在线数据相似度。</p>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => setActiveTab('manual')}
+            className={`text-xs rounded-md px-2 py-1.5 border ${
+              activeTab === 'manual'
+                ? 'bg-indigo-600 border-indigo-500 text-white'
+                : 'bg-slate-800 border-slate-700 text-slate-300'
+            }`}
+          >
+            手动配方合成
+          </button>
+          <button
+            onClick={() => setActiveTab('online-db')}
+            className={`text-xs rounded-md px-2 py-1.5 border ${
+              activeTab === 'online-db'
+                ? 'bg-indigo-600 border-indigo-500 text-white'
+                : 'bg-slate-800 border-slate-700 text-slate-300'
+            }`}
+          >
+            在线数据库曲线分析
+          </button>
+        </div>
+        <p className="text-xs text-slate-500">
+          {activeTab === 'manual'
+            ? '从标准染料库选择染料并输入浓度（g/L），在输入窗口内执行光谱合成，并对比在线数据相似度。'
+            : '勾选在线数据库曲线后，系统按其染料与浓度自动合成对应光谱，并与在线曲线进行对比。'}
+        </p>
 
         <div className="flex flex-wrap items-center gap-3">
           <label className="text-sm text-slate-400">输入窗口 (nm)</label>
@@ -359,41 +469,45 @@ export const SpectrumSynthesisPanel: React.FC = () => {
           />
         </div>
 
-        <div className="space-y-2 max-h-56 overflow-auto pr-1">
-          {synthesisRows.map((row, idx) => (
-            <div key={`synthesis-row-${idx}`} className="grid grid-cols-12 gap-2 items-center">
-              <select
-                value={row.filename}
-                onChange={(e) => updateSynthesisRow(idx, 'filename', e.target.value)}
-                className="col-span-7 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200"
-              >
-                <option value="">选择标准染料</option>
-                {standardItems.map((item) => (
-                  <option key={item.filename} value={item.filename}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-              <input
-                value={row.concentration}
-                onChange={(e) => updateSynthesisRow(idx, 'concentration', e.target.value)}
-                placeholder="g/L"
-                className="col-span-3 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200"
-              />
-              <button
-                onClick={() => removeSynthesisRow(idx)}
-                className="col-span-2 text-xs px-2 py-1 bg-slate-800 rounded border border-slate-700 hover:bg-slate-700"
-              >
-                删除
-              </button>
+        {activeTab === 'manual' ? (
+          <>
+            <div className="space-y-2 max-h-56 overflow-auto pr-1">
+              {synthesisRows.map((row, idx) => (
+                <div key={`synthesis-row-${idx}`} className="grid grid-cols-12 gap-2 items-center">
+                  <select
+                    value={row.filename}
+                    onChange={(e) => updateSynthesisRow(idx, 'filename', e.target.value)}
+                    className="col-span-7 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200"
+                  >
+                    <option value="">选择标准染料</option>
+                    {standardItems.map((item) => (
+                      <option key={item.filename} value={item.filename}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    value={row.concentration}
+                    onChange={(e) => updateSynthesisRow(idx, 'concentration', e.target.value)}
+                    placeholder="g/L"
+                    className="col-span-3 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200"
+                  />
+                  <button
+                    onClick={() => removeSynthesisRow(idx)}
+                    className="col-span-2 text-xs px-2 py-1 bg-slate-800 rounded border border-slate-700 hover:bg-slate-700"
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
 
-        <div className="flex gap-2">
-          <button onClick={addSynthesisRow} className="px-3 py-1.5 text-xs bg-slate-800 rounded border border-slate-700">+ 添加染料</button>
-          <button onClick={runNllsSynthesis} disabled={loading} className="px-3 py-1.5 text-xs bg-indigo-600 rounded disabled:bg-slate-700">执行合成</button>
-        </div>
+            <div className="flex gap-2">
+              <button onClick={addSynthesisRow} className="px-3 py-1.5 text-xs bg-slate-800 rounded border border-slate-700">+ 添加染料</button>
+              <button onClick={runNllsSynthesis} disabled={loading} className="px-3 py-1.5 text-xs bg-indigo-600 rounded disabled:bg-slate-700">执行合成</button>
+            </div>
+          </>
+        ) : null}
 
         <div className="border-t border-slate-800 pt-3">
           <p className="text-sm text-slate-300 mb-2">在线数据库曲线对比</p>
@@ -416,7 +530,9 @@ export const SpectrumSynthesisPanel: React.FC = () => {
             {!onlineCurveOptions.length && <p className="text-xs text-slate-600">暂无在线数据库染料曲线</p>}
           </div>
           <p className="text-[11px] text-slate-500 mt-2">
-            勾选在线曲线后，点击“执行合成”将自动带入对应在线记录中的染料配方与浓度。
+            {activeTab === 'manual'
+              ? '勾选在线曲线后，点击“执行合成”将自动带入对应在线记录中的染料配方与浓度。'
+              : '勾选在线曲线后会自动按该曲线对应配方合成并在右侧比较。'}
           </p>
         </div>
 
@@ -456,7 +572,9 @@ export const SpectrumSynthesisPanel: React.FC = () => {
       </aside>
 
       <div className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-lg p-4 h-[420px]">
-        <h3 className="text-sm font-semibold text-slate-300 mb-2">合成光谱 vs 在线数据库曲线</h3>
+        <h3 className="text-sm font-semibold text-slate-300 mb-2">
+          {activeTab === 'manual' ? '合成光谱 vs 在线数据库曲线' : '在线数据库：自动配方合成 vs 原始在线曲线'}
+        </h3>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={synthesisChartData} margin={{ top: 20, right: 20, bottom: 30, left: 10 }}>
             <CartesianGrid stroke="#334155" />
@@ -470,17 +588,42 @@ export const SpectrumSynthesisPanel: React.FC = () => {
                 </span>
               )}
             />
-            <Line type="monotone" dataKey="synthesis" stroke="#f43f5e" strokeWidth={2} dot={false} name="合成光谱" />
-            {compareSeries.map((series, index) => (
-              <Line
-                key={`compare-${series.name}`}
-                type="monotone"
-                dataKey={series.name}
-                stroke={['#22d3ee', '#84cc16', '#f59e0b', '#a78bfa'][index % 4]}
-                dot={false}
-                name={series.name}
-              />
-            ))}
+            {activeTab === 'manual' ? (
+              <>
+                <Line type="monotone" dataKey="synthesis" stroke="#f43f5e" strokeWidth={2} dot={false} name="合成光谱" />
+                {compareSeries.map((series, index) => (
+                  <Line
+                    key={`compare-${series.name}`}
+                    type="monotone"
+                    dataKey={series.name}
+                    stroke={['#22d3ee', '#84cc16', '#f59e0b', '#a78bfa'][index % 4]}
+                    dot={false}
+                    name={series.name}
+                  />
+                ))}
+              </>
+            ) : (
+              <>
+                {onlineDbComparisons.flatMap((item, index) => ([
+                  <Line
+                    key={`synth-${item.curveName}`}
+                    type="monotone"
+                    dataKey={`合成-${item.curveName}`}
+                    stroke={['#f43f5e', '#ef4444', '#ec4899', '#fb7185'][index % 4]}
+                    dot={false}
+                    name={`合成-${item.curveName}`}
+                  />,
+                  <Line
+                    key={`online-${item.curveName}`}
+                    type="monotone"
+                    dataKey={`在线-${item.curveName}`}
+                    stroke={['#22d3ee', '#84cc16', '#f59e0b', '#a78bfa'][index % 4]}
+                    dot={false}
+                    name={`在线-${item.curveName}`}
+                  />,
+                ]))}
+              </>
+            )}
           </LineChart>
         </ResponsiveContainer>
       </div>
