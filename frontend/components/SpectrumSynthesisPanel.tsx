@@ -175,8 +175,8 @@ export const SpectrumSynthesisPanel: React.FC = () => {
   const [onlineItems, setOnlineItems] = useState<HistoryItem[]>([]);
   const [synthesisRows, setSynthesisRows] = useState<SynthesisRow[]>([{ filename: '', concentration: '' }]);
   const [selectedOnlineCurveIds, setSelectedOnlineCurveIds] = useState<string[]>([]);
-  const [rangeMinNm, setRangeMinNm] = useState<number>(188);
-  const [rangeMaxNm, setRangeMaxNm] = useState<number>(800);
+  const [rangeMinNm, setRangeMinNm] = useState<number>(400);
+  const [rangeMaxNm, setRangeMaxNm] = useState<number>(700);
   const [synthesisResult, setSynthesisResult] = useState<{
     wavelength: number[];
     absorbance: number[];
@@ -460,10 +460,19 @@ export const SpectrumSynthesisPanel: React.FC = () => {
     const selectedCurveOptions = selectedOnlineCurveIds
       .map((id) => onlineCurveOptions.find((item) => item.id === id))
       .filter((item): item is OnlineCurveOption => Boolean(item));
+    const standardNameLookup = new Map<string, string>();
+    standardItems.forEach((item) => {
+      if (!item.filename) return;
+      standardNameLookup.set(item.filename, item.name || item.filename);
+    });
     return selectedCurveOptions
-      .map((option) => `【${option.name}】\n${buildOnlineCurveHoverText(option.item)}`)
-      .join('\n\n');
-  }, [selectedOnlineCurveIds, onlineCurveOptions]);
+      .flatMap((option) => parseOnlineRecipeRows(option.item, standardItems)
+        .map((row) => {
+          const dyeName = standardNameLookup.get(row.filename) || row.filename;
+          return `${dyeName}\t${row.concentration}`;
+        }))
+      .join('\n');
+  }, [selectedOnlineCurveIds, onlineCurveOptions, standardItems]);
 
   return (
     <div className="max-w-7xl mx-auto h-full grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[420px] text-slate-300">
