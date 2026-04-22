@@ -64,18 +64,26 @@ const parseFirstNumber = (raw: string | undefined): number | null => {
   return Number.isFinite(num) ? num : null;
 };
 
+const decodeEscapedControlChars = (value: string): string => (
+  value
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\t/g, '\t')
+    .trim()
+);
+
 const parseOnlineRecipeRows = (
   item: HistoryItem,
   standardItems: HistoryItem[]
 ): ResolvedSynthesisRow[] => {
   const standardTokens = (item.meta?.online_standard || '')
     .split('+')
-    .map((token) => token.trim())
+    .map((token) => decodeEscapedControlChars(token))
     .filter(Boolean);
   const concentrationTokens = (item.meta?.online_concentration || '')
     .split('+')
-    .map((token) => token.trim());
-  if (!standardTokens.length || !concentrationTokens.length) return [];
+    .map((token) => decodeEscapedControlChars(token));
+  if (!standardTokens.length) return [];
 
   const standardLookup = new Map<string, string>();
   standardItems.forEach((standard) => {
@@ -83,6 +91,30 @@ const parseOnlineRecipeRows = (
     const standardName = (standard.name || '').trim();
     if (standardName) standardLookup.set(standardName, standard.filename);
   });
+
+  const hasConcentrationTokens = concentrationTokens.some(Boolean);
+  if (!hasConcentrationTokens && standardTokens.length === 1 && standardTokens[0].includes('\n')) {
+    return standardTokens[0]
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .filter((line) => !line.includes('染料名称') && !line.includes('浓度'))
+      .map((line) => {
+        const [namePart = '', concPart = ''] = line.split('\t').map((part) => part.trim());
+        const concentrationNum = parseFirstNumber(concPart || line);
+        const filename = standardLookup.get(namePart) || namePart;
+        return {
+          filename,
+          concentration: concentrationNum === null ? concPart : String(concentrationNum),
+          concentrationNum,
+        };
+      })
+      .filter((row): row is ResolvedSynthesisRow => (
+        Boolean(row.filename)
+        && row.concentrationNum !== null
+        && row.concentrationNum > 0
+      ));
+  }
 
   return standardTokens
     .map((standardRef, idx) => {
@@ -104,11 +136,11 @@ const parseOnlineRecipeRows = (
 const buildRecipeTooltipText = (item: ProcessedData): string => {
   const standardTokens = (item.meta?.online_standard || '')
     .split('+')
-    .map((token) => token.trim())
+    .map((token) => decodeEscapedControlChars(token))
     .filter(Boolean);
   const concentrationTokens = (item.meta?.online_concentration || '')
     .split('+')
-    .map((token) => token.trim());
+    .map((token) => decodeEscapedControlChars(token));
   if (!standardTokens.length) return '无染料/浓度信息';
   return standardTokens
     .map((dyeName, idx) => `${dyeName}: ${concentrationTokens[idx] || '-'}`)
@@ -118,12 +150,15 @@ const buildRecipeTooltipText = (item: ProcessedData): string => {
 const buildOnlineCurveHoverText = (item: HistoryItem): string => {
   const standardTokens = (item.meta?.online_standard || '')
     .split('+')
-    .map((token) => token.trim())
+    .map((token) => decodeEscapedControlChars(token))
     .filter(Boolean);
   const concentrationTokens = (item.meta?.online_concentration || '')
     .split('+')
-    .map((token) => token.trim());
+    .map((token) => decodeEscapedControlChars(token));
   if (!standardTokens.length) return '无染料/浓度信息';
+  if (!concentrationTokens.some(Boolean) && standardTokens.length === 1 && standardTokens[0].includes('\n')) {
+    return standardTokens[0];
+  }
   return standardTokens
     .map((dyeName, idx) => `${dyeName}\t${concentrationTokens[idx] || '-'}`)
     .join('\n');
