@@ -420,6 +420,16 @@ export const SpectrumSynthesisPanel: React.FC = () => {
     return next;
   }, [activeTab, compareSeries, onlineDbComparisons]);
 
+  const selectedOnlineCurveRecipeText = useMemo(() => {
+    if (!selectedOnlineCurveIds.length) return '';
+    const selectedCurveOptions = selectedOnlineCurveIds
+      .map((id) => onlineCurveOptions.find((item) => item.id === id))
+      .filter((item): item is OnlineCurveOption => Boolean(item));
+    return selectedCurveOptions
+      .map((option) => `【${option.name}】\n${buildOnlineCurveHoverText(option.item)}`)
+      .join('\n\n');
+  }, [selectedOnlineCurveIds, onlineCurveOptions]);
+
   return (
     <div className="max-w-7xl mx-auto h-full grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[420px] text-slate-300">
       <aside className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-lg p-4 space-y-4">
@@ -534,6 +544,16 @@ export const SpectrumSynthesisPanel: React.FC = () => {
               ? '勾选在线曲线后，点击“执行合成”将自动带入对应在线记录中的染料配方与浓度。'
               : '勾选在线曲线后会自动按该曲线对应配方合成并在右侧比较。'}
           </p>
+          <div className="mt-2">
+            <label className="text-[11px] text-slate-500 block mb-1">已勾选曲线的染料及浓度</label>
+            <textarea
+              value={selectedOnlineCurveRecipeText}
+              readOnly
+              rows={5}
+              placeholder="勾选在线曲线后，这里将显示对应染料与浓度。"
+              className="w-full bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-slate-300 resize-y min-h-[90px]"
+            />
+          </div>
         </div>
 
         {autoFilledSourceName ? (
