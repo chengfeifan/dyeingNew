@@ -4,7 +4,7 @@ import { fetchHistoryItem, fetchHistoryList } from '../services/api';
 import { HistoryItem, ProcessedData } from '../types';
 
 type SynthesisRow = { filename: string; concentration: string };
-type SimilarityRow = { name: string; rmse: number; similarity: number };
+type SimilarityRow = { name: string; rmse: number; similarity: number; areaRatio: number | null };
 type ParsedOnlineRecipe = { rows: SynthesisRow[]; sourceName: string };
 type OnlineCurveOption = { id: string; filename: string; name: string; item: HistoryItem };
 type CompareSeries = { name: string; wavelength: number[]; absorbance: number[]; recipeTooltip: string };
@@ -167,6 +167,18 @@ const buildOnlineCurveHoverText = (item: HistoryItem): string => {
 const formatTick = (value: number | string): string => {
   const num = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(num) ? num.toFixed(2) : `${value}`;
+};
+
+const integrateArea = (wavelength: number[], absorbance: number[]): number => {
+  const pairedLength = Math.min(wavelength.length, absorbance.length);
+  if (pairedLength < 2) return 0;
+  let area = 0;
+  for (let i = 1; i < pairedLength; i += 1) {
+    const deltaWavelength = wavelength[i] - wavelength[i - 1];
+    const avgAbsorbance = (absorbance[i] + absorbance[i - 1]) / 2;
+    area += deltaWavelength * avgAbsorbance;
+  }
+  return area;
 };
 
 export const SpectrumSynthesisPanel: React.FC = () => {
@@ -406,30 +418,47 @@ export const SpectrumSynthesisPanel: React.FC = () => {
     if (activeTab === 'online-db') {
       return onlineDbComparisons.map((item) => {
         const pairedLength = Math.min(item.synthesis.absorbance.length, item.online.absorbance.length);
-        if (!pairedLength) return { name: item.curveName, rmse: Number.POSITIVE_INFINITY, similarity: 0 };
+        if (!pairedLength) return {
+          name: item.curveName,
+          rmse: Number.POSITIVE_INFINITY,
+          similarity: 0,
+          areaRatio: null,
+        };
         let squaredError = 0;
         for (let i = 0; i < pairedLength; i += 1) {
           const delta = item.synthesis.absorbance[i] - item.online.absorbance[i];
           squaredError += delta * delta;
         }
         const rmse = Math.sqrt(squaredError / pairedLength);
-        return { name: item.curveName, rmse, similarity: 1 / (1 + rmse) };
+        const synthesisArea = integrateArea(item.synthesis.wavelength, item.synthesis.absorbance);
+        const onlineArea = integrateArea(item.online.wavelength, item.online.absorbance);
+        const areaRatio = Math.abs(synthesisArea) > 1e-12 ? onlineArea / synthesisArea : null;
+        return { name: item.curveName, rmse, similarity: 1 / (1 + rmse), areaRatio };
       }).sort((a, b) => b.similarity - a.similarity);
     }
     if (!synthesisResult || !compareSeries.length) return [];
     return compareSeries.map((series) => {
       const pairedLength = Math.min(synthesisResult.absorbance.length, series.absorbance.length);
-      if (!pairedLength) return { name: series.name, rmse: Number.POSITIVE_INFINITY, similarity: 0 };
+      if (!pairedLength) return {
+        name: series.name,
+        rmse: Number.POSITIVE_INFINITY,
+        similarity: 0,
+        areaRatio: null,
+      };
       let squaredError = 0;
       for (let i = 0; i < pairedLength; i += 1) {
         const delta = synthesisResult.absorbance[i] - series.absorbance[i];
         squaredError += delta * delta;
       }
       const rmse = Math.sqrt(squaredError / pairedLength);
+      const synthesisArea = integrateArea(synthesisResult.wavelength, synthesisResult.absorbance);
+      const onlineArea = integrateArea(synthesisResult.wavelength, series.absorbance);
+      const areaRatio = Math.abs(synthesisArea) > 1e-12 ? onlineArea / synthesisArea : null;
       return {
         name: series.name,
         rmse,
         similarity: 1 / (1 + rmse),
+        areaRatio,
       };
     }).sort((a, b) => b.similarity - a.similarity);
   }, [activeTab, synthesisResult, compareSeries, onlineDbComparisons]);
@@ -614,7 +643,11 @@ export const SpectrumSynthesisPanel: React.FC = () => {
                 <span className="truncate">
                   {idx === 0 ? '⭐ ' : ''}{item.name}
                 </span>
-                <span>相似度 {(item.similarity * 100).toFixed(2)}%</span>
+                <span className="text-right">
+                  相似度 {(item.similarity * 100).toFixed(2)}%
+                  <br />
+                  面积比(在线/合成) {item.areaRatio === null ? '--' : item.areaRatio.toFixed(4)}
+                </span>
               </div>
             ))}
           </div>
