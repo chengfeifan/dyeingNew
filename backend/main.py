@@ -3,7 +3,8 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pathlib import Path
-import io, zipfile
+import io, zipfile, json
+from datetime import datetime
 import numpy as np
 import pandas as pd
 
@@ -23,7 +24,7 @@ from core import (
 from storage import (
     save_json, list_history, load_json, rename_history,
     update_history_meta, delete_history, authenticate_user,
-    list_users, create_user, delete_user, replace_history_data
+    list_users, create_user, delete_user, replace_history_data, export_history_rows
 )
 
 app = FastAPI(title="Spectra Processor API", version="1.0.0")
@@ -219,6 +220,25 @@ async def history_item_csv(name: str):
     buff.seek(0)
     return StreamingResponse(iter([buff.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": f"attachment; filename={name}.csv"})
+
+
+@app.get("/export/history-json")
+async def export_history_json():
+    rows = export_history_rows()
+    payload = {
+        "table": "history",
+        "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "count": len(rows),
+        "rows": rows,
+    }
+    content = json.dumps(payload, ensure_ascii=False, indent=2)
+    export_date = datetime.now().strftime("%Y-%m-%d")
+    filename = f"history{export_date}.json"
+    return StreamingResponse(
+        iter([content]),
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 @app.get("/export/batch")
 async def export_batch_zip():
