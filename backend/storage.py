@@ -306,6 +306,31 @@ def delete_history(name: str) -> None:
     if legacy_file.exists():
         legacy_file.unlink()
 
+
+def export_history_rows() -> List[dict]:
+    rows_out: List[dict] = []
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, name, timestamp, meta, data FROM history ORDER BY id ASC"
+        ).fetchall()
+        for row in rows:
+            try:
+                meta = json.loads(row["meta"])
+            except Exception:
+                meta = row["meta"]
+            try:
+                data = json.loads(row["data"])
+            except Exception:
+                data = row["data"]
+            rows_out.append({
+                "id": row["id"],
+                "name": row["name"],
+                "timestamp": row["timestamp"],
+                "meta": meta,
+                "data": data,
+            })
+    return rows_out
+
 def _get_user(username: str) -> Optional[sqlite3.Row]:
     with _get_conn() as conn:
         return conn.execute(
