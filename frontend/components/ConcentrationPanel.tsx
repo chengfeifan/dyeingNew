@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { HistoryItem, ConcentrationResult, ConcentrationMethodResult, ProcessedData } from '../types';
-import { fetchHistoryList, analyzeConcentration, analyzeConcentrationMethods, fetchHistoryItem, updateHistoryItem, deleteHistoryItem, reprocessHistorySpectrum } from '../services/api';
-import { BeakerIcon, PlayIcon, BookOpenIcon, TrashIcon, CheckIcon, XMarkIcon, PencilSquareIcon, DocumentTextIcon, TableCellsIcon, ArchiveBoxIcon, EyeIcon, CircleStackIcon } from '@heroicons/react/24/outline';
+import { fetchHistoryList, analyzeConcentration, analyzeConcentrationMethods, fetchHistoryItem, updateHistoryItem, deleteHistoryItem, reprocessHistorySpectrum, getHistoryJsonExportUrl } from '../services/api';
+import { BeakerIcon, PlayIcon, BookOpenIcon, TrashIcon, CheckIcon, XMarkIcon, PencilSquareIcon, DocumentTextIcon, TableCellsIcon, ArchiveBoxIcon, EyeIcon, CircleStackIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { WavelengthColorBand } from './WavelengthColorBand';
 
-type Tab = 'analysis' | 'standard-library' | 'sample-library' | 'online-library';
+type Tab = 'analysis' | 'standard-library' | 'sample-library' | 'online-library' | 'data-export';
 type AnalysisMethod = 'nnls' | 'lambda_equations' | 'peak_area' | 'ratio_derivative_2c' | 'zero_cross_ratio_derivative_3c';
 type RatioMethodRow = {
     component: string;
@@ -18,7 +18,7 @@ type RatioMethodRow = {
 export const ConcentrationPanel: React.FC = () => {
     const [activeTab, setActiveTab] = useState<Tab>('analysis');
     const [history, setHistory] = useState<HistoryItem[]>([]);
-    
+
     // Analysis State
     const [selectedSample, setSelectedSample] = useState<string>('');
     const [selectedStandards, setSelectedStandards] = useState<string[]>([]);
@@ -61,6 +61,7 @@ export const ConcentrationPanel: React.FC = () => {
     const [onlineConcentrationItem, setOnlineConcentrationItem] = useState<HistoryItem | null>(null);
     const [librarySearch, setLibrarySearch] = useState<string>('');
     const [libraryConcentrationFilter, setLibraryConcentrationFilter] = useState<'all' | 'with' | 'without'>('all');
+    const [exportingHistoryJson, setExportingHistoryJson] = useState(false);
 
     useEffect(() => {
         loadHistory();
@@ -145,9 +146,9 @@ export const ConcentrationPanel: React.FC = () => {
     // --- Analysis Actions ---
 
     const toggleStandard = (filename: string) => {
-        setSelectedStandards(prev => 
-            prev.includes(filename) 
-                ? prev.filter(f => f !== filename) 
+        setSelectedStandards(prev =>
+            prev.includes(filename)
+                ? prev.filter(f => f !== filename)
                 : [...prev, filename]
         );
     };
@@ -415,6 +416,19 @@ export const ConcentrationPanel: React.FC = () => {
         }
     };
 
+    const handleExportHistoryJson = () => {
+        setExportingHistoryJson(true);
+        const link = document.createElement("a");
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        link.href = getHistoryJsonExportUrl();
+        link.download = `history${today}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.setTimeout(() => setExportingHistoryJson(false), 1000);
+    };
+
     const viewedChartData = useMemo(() => {
         if (!viewingItemData) return [];
         const min = Number(viewRangeMin);
@@ -464,14 +478,14 @@ export const ConcentrationPanel: React.FC = () => {
 
     return (
         <div className="max-w-7xl mx-auto flex flex-col h-full gap-4 text-slate-300">
-            
+
             {/* Top Navigation Tab */}
             <div className="flex space-x-1 bg-slate-900 p-1 rounded-md border border-slate-800 w-fit shadow-md">
                 <button
                     onClick={() => setActiveTab('analysis')}
                     className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-colors ${
-                        activeTab === 'analysis' 
-                        ? 'bg-slate-800 text-indigo-400 shadow-sm border border-slate-700' 
+                        activeTab === 'analysis'
+                        ? 'bg-slate-800 text-indigo-400 shadow-sm border border-slate-700'
                         : 'text-slate-500 hover:text-slate-300'
                     }`}
                 >
@@ -481,8 +495,8 @@ export const ConcentrationPanel: React.FC = () => {
                 <button
                     onClick={() => setActiveTab('standard-library')}
                     className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-colors ${
-                        activeTab === 'standard-library' 
-                        ? 'bg-slate-800 text-indigo-400 shadow-sm border border-slate-700' 
+                        activeTab === 'standard-library'
+                        ? 'bg-slate-800 text-indigo-400 shadow-sm border border-slate-700'
                         : 'text-slate-500 hover:text-slate-300'
                     }`}
                 >
@@ -492,8 +506,8 @@ export const ConcentrationPanel: React.FC = () => {
                 <button
                     onClick={() => setActiveTab('sample-library')}
                     className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-colors ${
-                        activeTab === 'sample-library' 
-                        ? 'bg-slate-800 text-indigo-400 shadow-sm border border-slate-700' 
+                        activeTab === 'sample-library'
+                        ? 'bg-slate-800 text-indigo-400 shadow-sm border border-slate-700'
                         : 'text-slate-500 hover:text-slate-300'
                     }`}
                 >
@@ -503,13 +517,24 @@ export const ConcentrationPanel: React.FC = () => {
                 <button
                     onClick={() => setActiveTab('online-library')}
                     className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-colors ${
-                        activeTab === 'online-library' 
-                        ? 'bg-slate-800 text-indigo-400 shadow-sm border border-slate-700' 
+                        activeTab === 'online-library'
+                        ? 'bg-slate-800 text-indigo-400 shadow-sm border border-slate-700'
                         : 'text-slate-500 hover:text-slate-300'
                     }`}
                 >
                     <ArchiveBoxIcon className="w-4 h-4" />
                     在线数据库管理
+                </button>
+                <button
+                    onClick={() => setActiveTab('data-export')}
+                    className={`px-4 py-2 rounded-md text-sm font-medium flex items-center gap-2 transition-colors ${
+                        activeTab === 'data-export'
+                        ? 'bg-slate-800 text-indigo-400 shadow-sm border border-slate-700'
+                        : 'text-slate-500 hover:text-slate-300'
+                    }`}
+                >
+                    <ArrowDownTrayIcon className="w-4 h-4" />
+                    数据导出
                 </button>
             </div>
 
@@ -725,7 +750,7 @@ export const ConcentrationPanel: React.FC = () => {
                                 <span className="bg-indigo-900/50 text-indigo-400 w-6 h-6 rounded-full flex items-center justify-center text-xs border border-indigo-500/30">1</span>
                                 选择待测样品
                             </h3>
-                            <select 
+                            <select
                                 className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
                                 value={selectedSample}
                                 onChange={(e) => {
@@ -758,7 +783,7 @@ export const ConcentrationPanel: React.FC = () => {
                                     className="w-full bg-slate-800 border-slate-700 rounded-md text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-slate-200"
                                 />
                             </div>
-                            
+
                             <div className="h-64 overflow-y-auto border border-slate-700 rounded-md p-2 space-y-1 bg-slate-950/30 custom-scrollbar">
                                 {filteredStandards.length === 0 && (
                                     <div className="text-center text-slate-600 py-4 text-sm">
@@ -767,7 +792,7 @@ export const ConcentrationPanel: React.FC = () => {
                                 )}
                                 {filteredStandards.map(std => (
                                     <label key={std.filename} className="flex items-start gap-2 p-2 hover:bg-slate-800 rounded cursor-pointer border border-transparent hover:border-slate-700">
-                                        <input 
+                                        <input
                                             type="checkbox"
                                             checked={selectedStandards.includes(std.filename)}
                                             onChange={() => toggleStandard(std.filename)}
@@ -787,7 +812,7 @@ export const ConcentrationPanel: React.FC = () => {
                             </div>
                         </div>
 
-                        <button 
+                        <button
                             onClick={handleAnalyze}
                             disabled={!canAnalyze}
                             className="w-full py-3 bg-indigo-600 text-white rounded-md font-semibold hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 transition-colors shadow-lg shadow-indigo-900/20 flex justify-center items-center gap-2 border border-transparent disabled:border-slate-700"
@@ -817,7 +842,7 @@ export const ConcentrationPanel: React.FC = () => {
                                         解析结果
                                     </h3>
                                     <div className="flex gap-2">
-                                        <button 
+                                        <button
                                             onClick={handleExportJSON}
                                             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-400 bg-slate-800 hover:bg-slate-700 rounded-md transition-colors border border-slate-700"
                                             title="Export raw JSON data"
@@ -825,7 +850,7 @@ export const ConcentrationPanel: React.FC = () => {
                                             <DocumentTextIcon className="w-4 h-4" />
                                             JSON
                                         </button>
-                                        <button 
+                                        <button
                                             onClick={handleExportCSV}
                                             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-200 bg-slate-700 hover:bg-slate-600 rounded-md transition-colors border border-slate-600"
                                             title="Export CSV (Excel compatible)"
@@ -835,7 +860,7 @@ export const ConcentrationPanel: React.FC = () => {
                                         </button>
                                     </div>
                                 </div>
-                                
+
                                 {isNNLSResult(result) ? (
                                     <>
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
@@ -935,6 +960,45 @@ export const ConcentrationPanel: React.FC = () => {
                         )}
                     </div>
                 </div>
+            ) : activeTab === 'data-export' ? (
+                <div className="bg-slate-900 rounded-lg shadow-sm border border-slate-800 p-6 h-[calc(100vh-180px)] flex flex-col">
+                    <div className="max-w-3xl">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-10 h-10 rounded-lg bg-indigo-900/40 border border-indigo-500/30 flex items-center justify-center">
+                                <ArrowDownTrayIcon className="w-5 h-5 text-indigo-400" />
+                            </div>
+                            <div>
+                                <h3 className="text-lg font-semibold text-slate-100">history 表数据导出</h3>
+                                <p className="text-sm text-slate-500 mt-1">一键导出数据库中 history 表的完整数据，文件格式为 JSON。</p>
+                            </div>
+                        </div>
+                        <div className="bg-slate-950/50 border border-slate-800 rounded-lg p-5 space-y-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                                <div className="bg-slate-900 border border-slate-800 rounded-md p-3">
+                                    <div className="text-slate-500 text-xs mb-1">导出数据表</div>
+                                    <div className="text-slate-200 font-mono">history</div>
+                                </div>
+                                <div className="bg-slate-900 border border-slate-800 rounded-md p-3">
+                                    <div className="text-slate-500 text-xs mb-1">导出格式</div>
+                                    <div className="text-slate-200 font-mono">JSON</div>
+                                </div>
+                                <div className="bg-slate-900 border border-slate-800 rounded-md p-3">
+                                    <div className="text-slate-500 text-xs mb-1">文件名规则</div>
+                                    <div className="text-slate-200 font-mono">historyYYYY-MM-DD.json</div>
+                                </div>
+                            </div>
+                            <button
+                                onClick={handleExportHistoryJson}
+                                disabled={exportingHistoryJson}
+                                className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                                <ArrowDownTrayIcon className="w-4 h-4" />
+                                {exportingHistoryJson ? '正在导出...' : '一键导出 history JSON'}
+                            </button>
+                            <p className="text-xs text-slate-500">导出的 JSON 包含每条 history 记录的 id、name、timestamp、meta 和 data 字段。</p>
+                        </div>
+                    </div>
+                </div>
             ) : (
                 /* Library Management View */
                 <div className="bg-slate-900 rounded-lg shadow-sm border border-slate-800 p-6 overflow-hidden flex flex-col h-[calc(100vh-180px)]">
@@ -997,8 +1061,8 @@ export const ConcentrationPanel: React.FC = () => {
                                         {editingItem === item.filename ? (
                                             <>
                                                 <td className="px-6 py-4 whitespace-nowrap">
-                                                    <input 
-                                                        type="text" 
+                                                    <input
+                                                        type="text"
                                                         className="bg-slate-800 border-slate-600 rounded text-sm w-full focus:ring-indigo-500 focus:border-indigo-500 text-slate-200"
                                                         value={editForm.name}
                                                         onChange={(e) => setEditForm({...editForm, name: e.target.value})}
@@ -1039,7 +1103,7 @@ export const ConcentrationPanel: React.FC = () => {
                                                     </div>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
-                                                    <select 
+                                                    <select
                                                         className="bg-slate-800 border-slate-600 rounded text-sm w-full focus:ring-indigo-500 focus:border-indigo-500 text-slate-200"
                                                         value={editForm.type}
                                                         onChange={(e) => setEditForm({...editForm, type: e.target.value})}
@@ -1051,8 +1115,8 @@ export const ConcentrationPanel: React.FC = () => {
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     {editForm.type === 'standard' ? (
-                                                        <input 
-                                                            type="text" 
+                                                        <input
+                                                            type="text"
                                                             className="bg-slate-800 border-slate-600 rounded text-sm w-full focus:ring-indigo-500 focus:border-indigo-500 text-slate-200"
                                                             value={editForm.concentration}
                                                             placeholder="e.g. 1.0 g/L"
@@ -1091,8 +1155,8 @@ export const ConcentrationPanel: React.FC = () => {
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm">
                                                     <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full border ${
-                                                        item.meta?.save_type === 'standard' 
-                                                        ? 'bg-emerald-900/30 text-emerald-400 border-emerald-900' 
+                                                        item.meta?.save_type === 'standard'
+                                                        ? 'bg-emerald-900/30 text-emerald-400 border-emerald-900'
                                                         : item.meta?.save_type === 'online'
                                                             ? 'bg-cyan-900/30 text-cyan-300 border-cyan-800'
                                                             : 'bg-slate-800 text-slate-400 border-slate-700'
@@ -1110,7 +1174,7 @@ export const ConcentrationPanel: React.FC = () => {
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                                     <div className="flex justify-end gap-3">
-                                                        <button 
+                                                        <button
                                                             onClick={() => startEdit(item)}
                                                             className="text-indigo-400 hover:text-indigo-300"
                                                             title="Edit"
@@ -1133,7 +1197,7 @@ export const ConcentrationPanel: React.FC = () => {
                                                         >
                                                             <EyeIcon className="w-5 h-5" />
                                                         </button>
-                                                        <button 
+                                                        <button
                                                             onClick={() => handleDelete(item.filename)}
                                                             className="text-red-500 hover:text-red-400"
                                                             title="Delete"

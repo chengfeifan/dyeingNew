@@ -6,7 +6,7 @@ import hmac
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Iterator
 
 HISTORY_DIR = Path(os.getenv("HISTORY_DIR", Path.cwd() / "spectra_history"))
 DB_PATH = HISTORY_DIR / "history.db"
@@ -305,6 +305,40 @@ def delete_history(name: str) -> None:
     legacy_file = HISTORY_DIR / f"{name}.json"
     if legacy_file.exists():
         legacy_file.unlink()
+
+
+def _history_row_to_export(row: sqlite3.Row) -> dict:
+    try:
+        meta = json.loads(row["meta"])
+    except Exception:
+        meta = row["meta"]
+    try:
+        data = json.loads(row["data"])
+    except Exception:
+        data = row["data"]
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "timestamp": row["timestamp"],
+        "meta": meta,
+        "data": data,
+    }
+
+def count_history_rows() -> int:
+    with _get_conn() as conn:
+        row = conn.execute("SELECT COUNT(*) AS count FROM history").fetchone()
+        return int(row["count"] if row else 0)
+
+def iter_history_rows() -> Iterator[dict]:
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, name, timestamp, meta, data FROM history ORDER BY id ASC"
+        )
+        for row in rows:
+            yield _history_row_to_export(row)
+
+def export_history_rows() -> List[dict]:
+    return list(iter_history_rows())
 
 def _get_user(username: str) -> Optional[sqlite3.Row]:
     with _get_conn() as conn:

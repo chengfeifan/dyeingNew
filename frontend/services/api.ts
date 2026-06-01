@@ -184,6 +184,11 @@ export const downloadHistoryZip = async (): Promise<Blob> => {
   }
 };
 
+export const getHistoryJsonExportUrl = (): string => {
+  const base = API_BASE.replace(/\/$/, '');
+  return `${base}/export/history-json`;
+};
+
 export const analyzeConcentration = async (
   sampleFilename: string,
   standardFilenames: string[],

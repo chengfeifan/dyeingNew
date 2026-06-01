@@ -3,7 +3,8 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from pathlib import Path
-import io, zipfile
+import io, zipfile, json
+from datetime import datetime
 import numpy as np
 import pandas as pd
 
@@ -23,7 +24,7 @@ from core import (
 from storage import (
     save_json, list_history, load_json, rename_history,
     update_history_meta, delete_history, authenticate_user,
-    list_users, create_user, delete_user, replace_history_data
+    list_users, create_user, delete_user, replace_history_data, count_history_rows, iter_history_rows
 )
 
 app = FastAPI(title="Spectra Processor API", version="1.0.0")
@@ -219,6 +220,39 @@ async def history_item_csv(name: str):
     buff.seek(0)
     return StreamingResponse(iter([buff.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": f"attachment; filename={name}.csv"})
+
+
+@app.get("/export/history-json")
+async def export_history_json():
+    now = datetime.now()
+    exported_at = now.strftime("%Y-%m-%d %H:%M:%S")
+    filename = f"history{now.strftime('%Y-%m-%d')}.json"
+
+    def iter_json():
+        yield (
+            '{'
+            f'"table":{json.dumps("history", ensure_ascii=False)},'
+            f'"exported_at":{json.dumps(exported_at, ensure_ascii=False)},'
+            f'"count":{count_history_rows()},'
+            '"rows":['
+        )
+        first = True
+        for row in iter_history_rows():
+            if not first:
+                yield ','
+            yield json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+            first = False
+        yield ']}\n'
+
+    return StreamingResponse(
+        iter_json(),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 @app.get("/export/batch")
 async def export_batch_zip():
