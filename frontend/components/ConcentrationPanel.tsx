@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { HistoryItem, ConcentrationResult, ConcentrationMethodResult, ProcessedData } from '../types';
-import { fetchHistoryList, analyzeConcentration, analyzeConcentrationMethods, fetchHistoryItem, updateHistoryItem, deleteHistoryItem, reprocessHistorySpectrum, downloadHistoryJson } from '../services/api';
+import { fetchHistoryList, analyzeConcentration, analyzeConcentrationMethods, fetchHistoryItem, updateHistoryItem, deleteHistoryItem, reprocessHistorySpectrum, getHistoryJsonExportUrl } from '../services/api';
 import { BeakerIcon, PlayIcon, BookOpenIcon, TrashIcon, CheckIcon, XMarkIcon, PencilSquareIcon, DocumentTextIcon, TableCellsIcon, ArchiveBoxIcon, EyeIcon, CircleStackIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { WavelengthColorBand } from './WavelengthColorBand';
@@ -416,25 +416,17 @@ export const ConcentrationPanel: React.FC = () => {
         }
     };
 
-    const handleExportHistoryJson = async () => {
+    const handleExportHistoryJson = () => {
         setExportingHistoryJson(true);
-        try {
-            const blob = await downloadHistoryJson();
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement("a");
-            const now = new Date();
-            const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-            link.href = url;
-            link.download = `history${today}.json`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
-        } catch (e: any) {
-            alert(e?.message || "导出 history 表 JSON 失败");
-        } finally {
-            setExportingHistoryJson(false);
-        }
+        const link = document.createElement("a");
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        link.href = getHistoryJsonExportUrl();
+        link.download = `history${today}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.setTimeout(() => setExportingHistoryJson(false), 1000);
     };
 
     const viewedChartData = useMemo(() => {

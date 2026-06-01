@@ -184,13 +184,9 @@ export const downloadHistoryZip = async (): Promise<Blob> => {
   }
 };
 
-export const downloadHistoryJson = async (): Promise<Blob> => {
-  try {
-    const { data } = await api.get('/export/history-json', { responseType: 'blob' });
-    return data as Blob;
-  } catch (error) {
-    throw normalizeError(error);
-  }
+export const getHistoryJsonExportUrl = (): string => {
+  const base = API_BASE.replace(/\/$/, '');
+  return `${base}/export/history-json`;
 };
 
 export const analyzeConcentration = async (

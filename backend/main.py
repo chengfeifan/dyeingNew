@@ -24,7 +24,7 @@ from core import (
 from storage import (
     save_json, list_history, load_json, rename_history,
     update_history_meta, delete_history, authenticate_user,
-    list_users, create_user, delete_user, replace_history_data, export_history_rows
+    list_users, create_user, delete_user, replace_history_data, count_history_rows, iter_history_rows
 )
 
 app = FastAPI(title="Spectra Processor API", version="1.0.0")
@@ -224,20 +224,34 @@ async def history_item_csv(name: str):
 
 @app.get("/export/history-json")
 async def export_history_json():
-    rows = export_history_rows()
-    payload = {
-        "table": "history",
-        "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "count": len(rows),
-        "rows": rows,
-    }
-    content = json.dumps(payload, ensure_ascii=False, indent=2)
-    export_date = datetime.now().strftime("%Y-%m-%d")
-    filename = f"history{export_date}.json"
+    now = datetime.now()
+    exported_at = now.strftime("%Y-%m-%d %H:%M:%S")
+    filename = f"history{now.strftime('%Y-%m-%d')}.json"
+
+    def iter_json():
+        yield (
+            '{'
+            f'"table":{json.dumps("history", ensure_ascii=False)},'
+            f'"exported_at":{json.dumps(exported_at, ensure_ascii=False)},'
+            f'"count":{count_history_rows()},'
+            '"rows":['
+        )
+        first = True
+        for row in iter_history_rows():
+            if not first:
+                yield ','
+            yield json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+            first = False
+        yield ']}\n'
+
     return StreamingResponse(
-        iter([content]),
+        iter_json(),
         media_type="application/json",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 @app.get("/export/batch")
