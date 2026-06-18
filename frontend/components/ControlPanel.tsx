@@ -22,6 +22,7 @@ type OnlineDyeRow = {
   standardFilename: string;
   concentration: string;
   searchKeyword: string;
+  dyeCode: string;
 };
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, loading, hasData }) => {
@@ -45,7 +46,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
   const [concentration, setConcentration] = useState('');
   const [dyeCode, setDyeCode] = useState('');
   const [orderNo, setOrderNo] = useState('');
-  const [onlineRows, setOnlineRows] = useState<OnlineDyeRow[]>([{ standardFilename: '', concentration: '', searchKeyword: '' }]);
+  const [onlineRows, setOnlineRows] = useState<OnlineDyeRow[]>([{ standardFilename: '', concentration: '', searchKeyword: '', dyeCode: '' }]);
   const [standardItems, setStandardItems] = useState<HistoryItem[]>([]);
 
   useEffect(() => {
@@ -80,7 +81,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
   };
 
   const addOnlineRow = () => {
-    setOnlineRows((prev) => [...prev, { standardFilename: '', concentration: '', searchKeyword: '' }]);
+    setOnlineRows((prev) => [...prev, { standardFilename: '', concentration: '', searchKeyword: '', dyeCode: '' }]);
   };
 
   const removeOnlineRow = (index: number) => {
@@ -98,6 +99,15 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
   const onlineConcentrationText = validOnlineRows.map((row) => row.concentration).join(' + ');
   const standardLookup = useMemo(() => {
     return new Map(standardItems.map((item) => [item.filename, item.name || item.filename]));
+  }, [standardItems]);
+
+  const standardCodeLookup = useMemo(() => {
+    const lookup = new Map<string, HistoryItem>();
+    standardItems.forEach((item) => {
+      const code = (item.meta?.dye_code || '').trim();
+      if (code) lookup.set(code, item);
+    });
+    return lookup;
   }, [standardItems]);
 
   const isSaveDisabled = !saveName
@@ -257,7 +267,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
                         onChange={() => {
                           setSaveType('online');
                           if (!onlineRows.length) {
-                            setOnlineRows([{ standardFilename: '', concentration: '', searchKeyword: '' }]);
+                            setOnlineRows([{ standardFilename: '', concentration: '', searchKeyword: '', dyeCode: '' }]);
                           }
                         }}
                         className="bg-slate-800 border-slate-600 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-slate-900"
@@ -299,6 +309,27 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
                       <div key={`online-row-${idx}`} className="grid grid-cols-12 gap-2 items-center">
                         <div className="col-span-7 space-y-1">
                           <input
+                            value={row.dyeCode}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              const matched = standardCodeLookup.get(value.trim());
+                              setOnlineRows((prev) => prev.map((current, currentIdx) => {
+                                if (currentIdx !== idx) return current;
+                                if (matched) {
+                                  return {
+                                    ...current,
+                                    dyeCode: value,
+                                    standardFilename: matched.filename,
+                                    searchKeyword: matched.name || matched.filename,
+                                  };
+                                }
+                                return { ...current, dyeCode: value };
+                              }));
+                            }}
+                            placeholder="输入染料代码，如 01002"
+                            className="w-full bg-slate-950/60 border border-slate-700 rounded-md px-2 py-1 text-xs text-slate-300"
+                          />
+                          <input
                             value={row.searchKeyword}
                             onChange={(e) => updateOnlineRow(idx, 'searchKeyword', e.target.value)}
                             placeholder="搜索染料名称/文件名"
@@ -322,7 +353,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
                                 const keyword = row.searchKeyword.trim().toLowerCase();
                                 if (!keyword) return true;
                                 const name = item.name || '';
-                                return [name, item.filename].some((value) => value.toLowerCase().includes(keyword));
+                                const code = item.meta?.dye_code || '';
+                                return [name, item.filename, code].some((value) => value.toLowerCase().includes(keyword));
                               })
                               .map((item) => (
                                 <option key={item.filename} value={item.filename}>
