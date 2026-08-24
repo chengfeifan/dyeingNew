@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ProcessingParams } from '../types';
 import { BoltIcon, FolderArrowDownIcon } from '@heroicons/react/24/outline';
+import { DYE_OPTIONS, getDyeOption } from '../data/dyes';
 
 interface ControlPanelProps {
   onProcess: (files: { sample: File; water: File; dark: File }, params: ProcessingParams) => void;
@@ -206,13 +207,23 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-500 mb-1">染料代码 (Dye Code)</label>
-                      <input
-                          type="text"
-                          placeholder="例如: DYE-001"
+                      <select
                           value={dyeCode}
                           onChange={(e) => setDyeCode(e.target.value)}
                           className="w-full bg-slate-800 border-slate-700 rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500 text-sm text-slate-200"
-                      />
+                      >
+                        <option value="">请选择染料代码</option>
+                        {DYE_OPTIONS.map((dye) => (
+                          <option key={dye.code} value={dye.code}>
+                            {dye.code} · {dye.name} · {dye.category}
+                          </option>
+                        ))}
+                      </select>
+                      {dyeCode && getDyeOption(dyeCode) && (
+                        <p className="mt-1 text-xs text-indigo-400">
+                          {getDyeOption(dyeCode)!.name}（{getDyeOption(dyeCode)!.category}）
+                        </p>
+                      )}
                     </div>
                  </div>
              )}
@@ -228,7 +239,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ onProcess, onSave, l
              />
              <button
                 onClick={() => onSave(saveName, saveType, concentration, dyeCode)}
-                disabled={!saveName || (saveType === 'standard' && !concentration)}
+                disabled={!saveName || (saveType === 'standard' && (!concentration || !dyeCode))}
                 className="px-3 py-2 bg-emerald-700 text-white rounded-md hover:bg-emerald-600 disabled:bg-slate-800 disabled:text-slate-600 disabled:cursor-not-allowed flex items-center shadow-sm border border-emerald-600 disabled:border-slate-700"
              >
                 <FolderArrowDownIcon className="w-5 h-5" />
